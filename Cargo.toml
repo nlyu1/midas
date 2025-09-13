@@ -1,0 +1,3 @@
+[workspace]
+resolver = "3"
+members = ["agora/agora", "tutorial/rpc/json-tarpc"]
