@@ -1,5 +1,8 @@
 pub mod utils;
 pub use utils::OrError;
 
-pub mod pathtree;
+mod pathtree;
 pub use pathtree::{TreeNode, TreeNodeRef, TreeTrait};
+
+mod addresses;
+pub use addresses::PublisherAddressManager;

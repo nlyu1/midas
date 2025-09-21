@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use std::net::{IpAddr, Ipv6Addr};
 // "client" contains utilities like `Config`
 // "context" provides request-scoped metadata.

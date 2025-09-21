@@ -1,7 +1,6 @@
-use super::common::{AgoraMeta, DEFAULT_PORT};
+use super::protocol::{AgoraMeta, DEFAULT_PORT};
 use super::publisher_info::PublisherInfo;
-use crate::utils::OrError;
-use crate::utils::pathtree::{TreeNode, TreeNodeRef, TreeTrait};
+use crate::utils::{OrError, PublisherAddressManager, TreeNode, TreeNodeRef, TreeTrait};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -16,147 +15,101 @@ use tarpc::{
 
 // Shared server state that will be accessed by all connections
 #[derive(Debug)]
-struct ServerState {
+pub struct ServerState {
     path_tree: TreeNodeRef,
     publishers: HashMap<String, PublisherInfo>,
+    address_manager: PublisherAddressManager,
 }
 
 impl ServerState {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             path_tree: TreeNode::new("agora"),
             publishers: HashMap::new(),
+            address_manager: PublisherAddressManager::new(),
         }
     }
-}
 
-#[derive(Clone)]
-pub struct AgoraMetaServer {
-    state: Arc<Mutex<ServerState>>,
-}
+    pub fn path_tree(&self) -> TreeNodeRef {
+        self.path_tree.clone()
+    }
 
-impl AgoraMeta for AgoraMetaServer {
-    async fn register_publisher(
-        self,
-        _: context::Context,
-        publisher: PublisherInfo,
-        path: String,
-    ) -> OrError<()> {
-        let mut state = self.state.lock().unwrap();
-
+    pub fn register_publisher(&mut self, name: String, path: String) -> OrError<PublisherInfo> {
         // Validate path format strictly
         self.validate_path_format(&path)?;
 
         // Check if publisher already exists
-        if state.publishers.contains_key(&path) {
+        if self.publishers.contains_key(&path) {
+            let publisher_info = self.publishers.get(&path).unwrap();
             return Err(format!(
                 "Publisher {:?} already registered at {}. Check path or use `update` instead.",
-                publisher, path
+                publisher_info, path
             ));
         }
 
         // Check if any parent path is already a publisher (should be directories only)
-        self.validate_parent_paths_are_directories(&state, &path)?;
+        self.validate_parent_paths_are_directories(&path)?;
 
-        // Build parent paths as needed
-        self.ensure_path_exists(&mut state, &path)?;
-
-        // Store the publisher
-        state.publishers.insert(path, publisher);
-        Ok(())
-    }
-
-    async fn update_publisher(
-        self,
-        _: context::Context,
-        publisher: PublisherInfo,
-        path: String,
-    ) -> OrError<()> {
-        let mut state = self.state.lock().unwrap();
-
-        // Validate path format strictly
-        self.validate_path_format(&path)?;
-
-        if let Err(_) = state.path_tree.get_child(&path) {
+        // Check if the path already exists in the tree as a directory
+        // Publishers can only be registered at new paths, not existing directory nodes
+        if self.path_tree.get_child(&path).is_ok() {
             return Err(format!(
-                "Path {} does not exist. Current tree:\n{}. Check path or use `register` instead.",
-                path,
-                state.path_tree.to_string()
-            ));
-        }
-        match state.publishers.insert(path.clone(), publisher.clone()) {
-            Some(_) => Ok(()),
-            None => Err(format!(
-                "No publisher {:?} registered at {}. Check path or use `register` instead.",
-                publisher, path
-            )),
-        }
-    }
-
-    async fn remove_publisher(self, _: context::Context, path: String) -> OrError<()> {
-        let mut state = self.state.lock().unwrap();
-
-        // Validate path format strictly
-        self.validate_path_format(&path)?;
-
-        // Check if publisher exists before doing anything
-        if !state.publishers.contains_key(&path) {
-            return Err(format!(
-                "Can only remove paths associated with publishers: path '{}' is not associated with any publishers.",
+                "Path '{}' already exists as a directory in the tree. Publishers can only be registered at new paths.",
                 path
             ));
         }
 
-        // Check for child publishers BEFORE removing
-        let child_publishers = state
-            .publishers
-            .keys()
-            .filter(|p| p.starts_with(&format!("{}/", path)))
-            .collect::<Vec<_>>();
+        // Build parent paths as needed
+        self.ensure_path_exists(&path)?;
 
-        if !child_publishers.is_empty() {
-            return Err(format!(
-                "Cannot remove path '{}' with child publishers {:?}. Remove children first.",
-                path, child_publishers
-            ));
-        }
-
-        // Now safe to remove the publisher
-        state.publishers.remove(&path);
-
-        // Try to remove the path from the tree if it exists
-        if let Ok(_) = state.path_tree.get_child(&path) {
-            if let Err(e) = state.path_tree.remove_child(&path) {
-                // Don't fail the operation if tree removal fails
-                eprintln!("TreeNode operation failed: {}", e);
-            }
-        }
-
-        Ok(())
+        // Try allocating address for publisher. If succeeded, register
+        let service_address = self.address_manager.allocate_publisher_address()?;
+        let publisher_info = PublisherInfo::new(&name, service_address, 8080);
+        println!(
+            "Registered publisher {:?} at path {}",
+            publisher_info, &path
+        );
+        self.publishers.insert(path, publisher_info.clone());
+        Ok(publisher_info)
     }
 
-    async fn path_tree(self, _: context::Context) -> OrError<String> {
-        let state = self.state.lock().unwrap();
-        Ok(state.path_tree.to_repr())
-    }
-
-    async fn publisher_info(self, _: context::Context, path: String) -> OrError<PublisherInfo> {
-        let state = self.state.lock().unwrap();
-
+    pub fn remove_publisher(&mut self, path: String) -> OrError<PublisherInfo> {
         // Validate path format strictly
         self.validate_path_format(&path)?;
 
-        match state.publishers.get(&path) {
-            Some(publisher) => Ok(publisher.clone()),
-            None => Err(format!("Publisher not registered at {}", path)),
+        // Check if publisher exists and remove it
+        // Note: Due to parent validation, publishers can only exist at leaf nodes,
+        // so we don't need to check for child publishers anymore
+        match self.publishers.remove(&path) {
+            Some(publisher_info) => {
+                // Try to remove the path from the tree if it exists
+                if let Ok(_) = self.path_tree.get_child(&path) {
+                    if let Err(e) = self.path_tree.remove_child(&path) {
+                        // Don't fail the operation if tree removal fails
+                        eprintln!("TreeNode operation failed: {}", e);
+                    }
+                }
+                println!("Removed publisher {:?} from path {}", publisher_info, &path);
+                Ok(publisher_info)
+            }
+            None => Err(format!(
+                "Can only remove paths associated with publishers: path '{}' is not associated with any publishers.",
+                path
+            )),
         }
     }
-}
 
-impl AgoraMetaServer {
-    fn new(shared_state: Arc<Mutex<ServerState>>) -> Self {
-        Self {
-            state: shared_state,
+    pub fn get_path_tree_repr(&self) -> String {
+        self.path_tree.to_repr()
+    }
+
+    pub fn get_publisher_info(&self, path: String) -> OrError<PublisherInfo> {
+        // Validate path format strictly
+        self.validate_path_format(&path)?;
+
+        match self.publishers.get(&path) {
+            Some(publisher) => Ok(publisher.clone()),
+            None => Err(format!("Publisher not registered at {}", path)),
         }
     }
 
@@ -210,11 +163,7 @@ impl AgoraMetaServer {
         Ok(())
     }
 
-    fn validate_parent_paths_are_directories(
-        &self,
-        state: &ServerState,
-        path: &str,
-    ) -> OrError<()> {
+    fn validate_parent_paths_are_directories(&self, path: &str) -> OrError<()> {
         // Check if any parent path is already registered as a publisher
         // Example: if registering "dir/subdir/content", check if "dir" or "dir/subdir" are publishers
 
@@ -234,7 +183,7 @@ impl AgoraMetaServer {
             }
 
             // Check if this parent path is a publisher
-            if state.publishers.contains_key(&current_path) {
+            if self.publishers.contains_key(&current_path) {
                 return Err(format!(
                     "Path parent should all be directories, but '{}' is associated with a publisher. Consider removing first.",
                     current_path
@@ -245,7 +194,7 @@ impl AgoraMetaServer {
         Ok(())
     }
 
-    fn ensure_path_exists(&self, state: &mut ServerState, path: &str) -> OrError<()> {
+    fn ensure_path_exists(&mut self, path: &str) -> OrError<()> {
         // Path is already validated, so we can split safely
         let path_parts: Vec<&str> = path.split('/').collect();
         let mut current_path = String::new();
@@ -258,7 +207,7 @@ impl AgoraMetaServer {
             }
 
             // Check if this path segment exists, if not create it
-            if state.path_tree.get_child(&current_path).is_err() {
+            if self.path_tree.get_child(&current_path).is_err() {
                 // We need to create this path segment
                 let parent_path = if current_path.contains('/') {
                     let last_slash = current_path.rfind('/').unwrap();
@@ -268,9 +217,9 @@ impl AgoraMetaServer {
                 };
 
                 let parent_node = if parent_path.is_empty() {
-                    state.path_tree.clone()
+                    self.path_tree.clone()
                 } else {
-                    state.path_tree.get_child(parent_path)?
+                    self.path_tree.get_child(parent_path)?
                 };
 
                 let new_node = TreeNode::new(part);
@@ -279,6 +228,47 @@ impl AgoraMetaServer {
         }
 
         Ok(())
+    }
+}
+
+// Asynchronous wrapper around synchronous ServerState implementation that handles networking with defaults.
+#[derive(Clone)]
+pub struct AgoraMetaServer {
+    state: Arc<Mutex<ServerState>>,
+}
+
+impl AgoraMeta for AgoraMetaServer {
+    async fn register_publisher(
+        self,
+        _: context::Context,
+        name: String,
+        path: String,
+    ) -> OrError<PublisherInfo> {
+        let mut state = self.state.lock().unwrap();
+        state.register_publisher(name, path)
+    }
+
+    async fn remove_publisher(self, _: context::Context, path: String) -> OrError<PublisherInfo> {
+        let mut state = self.state.lock().unwrap();
+        state.remove_publisher(path)
+    }
+
+    async fn path_tree(self, _: context::Context) -> OrError<String> {
+        let state = self.state.lock().unwrap();
+        Ok(state.get_path_tree_repr())
+    }
+
+    async fn publisher_info(self, _: context::Context, path: String) -> OrError<PublisherInfo> {
+        let state = self.state.lock().unwrap();
+        state.get_publisher_info(path)
+    }
+}
+
+impl AgoraMetaServer {
+    fn new(shared_state: Arc<Mutex<ServerState>>) -> Self {
+        Self {
+            state: shared_state,
+        }
     }
 
     pub async fn run_server(port: Option<u16>) -> anyhow::Result<()> {

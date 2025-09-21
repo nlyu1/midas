@@ -30,6 +30,121 @@ pub trait TreeTrait {
     fn from_repr(repr: &str) -> OrError<TreeNodeRef>;
 }
 
+impl TreeTrait for TreeNode {
+    fn new(name: &str) -> Rc<Self> {
+        // assert that name does not contain slashes
+        assert!(!name.contains('/'), "TreeNode name cannot contain slashes");
+        Rc::new(TreeNode {
+            name: name.into(),
+            children: RefCell::new(Vec::new()),
+            parent: RefCell::new(None),
+        })
+    }
+
+    fn add_children(self: &Rc<Self>, names: &[&str]) {
+        // Create children of names as specified; set their parents correctly
+        for name in names {
+            let child = TreeNode::new(&name);
+            // Set parent of child
+            *child.parent.borrow_mut() = Some(Rc::downgrade(self));
+            // Add child to this node
+            self.children.borrow_mut().push(child);
+        }
+    }
+
+    fn add_child(self: &Rc<Self>, child: TreeNodeRef) {
+        // Set parent of child
+        *child.parent.borrow_mut() = Some(Rc::downgrade(self));
+        // Add child to this node
+        self.children.borrow_mut().push(child);
+    }
+
+    fn get_child(self: &Rc<Self>, path: &str) -> OrError<TreeNodeRef> {
+        // Same as "get_child", except might be recursive child1/child2/...
+        if path.is_empty() {
+            return Ok(self.clone());
+        }
+
+        let path_parts: Vec<&str> = path.split('/').collect();
+        let mut current_node = self.clone();
+
+        for part in path_parts {
+            if part.is_empty() {
+                continue; // Skip empty parts (e.g., from leading/trailing slashes)
+            }
+
+            current_node = current_node.get_immediate_child(part)?;
+        }
+
+        Ok(current_node)
+    }
+
+    fn remove_child(self: &TreeNodeRef, path: &str) -> OrError<()> {
+        let child = self.get_child(&path)?;
+        let child_name = child.name();
+        child.parent()?.remove_immediate_child(child_name)
+    }
+
+    fn parent(&self) -> OrError<TreeNodeRef> {
+        match self.parent.borrow().as_ref() {
+            Some(parent) => Ok(parent.upgrade().unwrap()),
+            None => Err(format!("Parent not found for '{}'", self.name)),
+        }
+    }
+
+    fn root(self: &Rc<Self>) -> TreeNodeRef {
+        match self.parent() {
+            Ok(parent) => parent.root(),
+            Err(_) => Rc::clone(self),
+        }
+    }
+
+    fn children(&self) -> Vec<TreeNodeRef> {
+        self.children.borrow().clone()
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn path(&self) -> String {
+        if self.is_root() {
+            format!("/{}", self.name().to_string())
+        } else {
+            format!("{}/{}", self.parent().unwrap().path(), self.name())
+        }
+    }
+
+    fn is_root(&self) -> bool {
+        self.parent.borrow().is_none()
+    }
+
+    fn is_leaf(&self) -> bool {
+        self.children.borrow().is_empty()
+    }
+
+    fn display_tree(&self) -> String {
+        self.to_string_helper("", true)
+    }
+
+    fn to_repr(&self) -> String {
+        // Simple JSON-like representation: {"name": "root", "children": [...]}
+        self.to_repr_helper()
+    }
+
+    fn from_repr(repr: &str) -> OrError<TreeNodeRef> {
+        TreeNode::from_repr_helper(repr)
+    }
+}
+
+impl fmt::Display for TreeNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Remove the trailing newline for cleaner display formatting
+        let tree_str = self.display_tree();
+        write!(f, "{}", tree_str.trim_end())
+    }
+}
+
 impl TreeNode {
     fn to_string_helper(&self, prefix: &str, is_last: bool) -> String {
         let mut result = String::new();
@@ -202,121 +317,5 @@ impl TreeNode {
         }
 
         Ok(result)
-    }
-}
-
-impl TreeTrait for TreeNode {
-    fn new(name: &str) -> Rc<Self> {
-        // assert that name does not contain slashes
-        println!("Creating TreeNode with name: {}", name);
-        assert!(!name.contains('/'), "TreeNode name cannot contain slashes");
-        Rc::new(TreeNode {
-            name: name.into(),
-            children: RefCell::new(Vec::new()),
-            parent: RefCell::new(None),
-        })
-    }
-
-    fn add_children(self: &Rc<Self>, names: &[&str]) {
-        // Create children of names as specified; set their parents correctly
-        for name in names {
-            let child = TreeNode::new(&name);
-            // Set parent of child
-            *child.parent.borrow_mut() = Some(Rc::downgrade(self));
-            // Add child to this node
-            self.children.borrow_mut().push(child);
-        }
-    }
-
-    fn add_child(self: &Rc<Self>, child: TreeNodeRef) {
-        // Set parent of child
-        *child.parent.borrow_mut() = Some(Rc::downgrade(self));
-        // Add child to this node
-        self.children.borrow_mut().push(child);
-    }
-
-    fn get_child(self: &Rc<Self>, path: &str) -> OrError<TreeNodeRef> {
-        // Same as "get_child", except might be recursive child1/child2/...
-        if path.is_empty() {
-            return Ok(self.clone());
-        }
-
-        let path_parts: Vec<&str> = path.split('/').collect();
-        let mut current_node = self.clone();
-
-        for part in path_parts {
-            if part.is_empty() {
-                continue; // Skip empty parts (e.g., from leading/trailing slashes)
-            }
-
-            current_node = current_node.get_immediate_child(part)?;
-        }
-
-        Ok(current_node)
-    }
-
-    fn remove_child(self: &TreeNodeRef, path: &str) -> OrError<()> {
-        let child = self.get_child(&path)?;
-        let child_name = child.name();
-        child.parent()?.remove_immediate_child(child_name)
-    }
-
-    fn parent(&self) -> OrError<TreeNodeRef> {
-        match self.parent.borrow().as_ref() {
-            Some(parent) => Ok(parent.upgrade().unwrap()),
-            None => Err(format!("Parent not found for '{}'", self.name)),
-        }
-    }
-
-    fn root(self: &Rc<Self>) -> TreeNodeRef {
-        match self.parent() {
-            Ok(parent) => parent.root(),
-            Err(_) => Rc::clone(self),
-        }
-    }
-
-    fn children(&self) -> Vec<TreeNodeRef> {
-        self.children.borrow().clone()
-    }
-
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn path(&self) -> String {
-        if self.is_root() {
-            format!("/{}", self.name().to_string())
-        } else {
-            format!("{}/{}", self.parent().unwrap().path(), self.name())
-        }
-    }
-
-    fn is_root(&self) -> bool {
-        self.parent.borrow().is_none()
-    }
-
-    fn is_leaf(&self) -> bool {
-        self.children.borrow().is_empty()
-    }
-
-    fn display_tree(&self) -> String {
-        self.to_string_helper("", true)
-    }
-
-    fn to_repr(&self) -> String {
-        // Simple JSON-like representation: {"name": "root", "children": [...]}
-        self.to_repr_helper()
-    }
-
-    fn from_repr(repr: &str) -> OrError<TreeNodeRef> {
-        TreeNode::from_repr_helper(repr)
-    }
-}
-
-impl fmt::Display for TreeNode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Remove the trailing newline for cleaner display formatting
-        let tree_str = self.display_tree();
-        write!(f, "{}", tree_str.trim_end())
     }
 }

@@ -1,4 +1,4 @@
-use agora::metaserver::{AgoraClient, DEFAULT_PORT, PublisherInfo};
+use agora::metaserver::{AgoraClient, DEFAULT_PORT};
 use agora::utils::TreeTrait;
 use clap::Parser;
 use std::io::{self, Write};
@@ -39,7 +39,6 @@ async fn main() -> anyhow::Result<()> {
     println!("\nWelcome to the Agora MetaClient!");
     println!("Available commands:");
     println!("  register <path>    - Register a demo publisher at path");
-    println!("  update <path>      - Update publisher at path");
     println!("  remove <path>      - Remove publisher at path");
     println!("  info <path>        - Get publisher info at path");
     println!("  print              - Print current path tree");
@@ -82,15 +81,6 @@ async fn main() -> anyhow::Result<()> {
                 register_publisher(&client, path).await;
                 print_path_tree(&client).await;
             }
-            "update" => {
-                if parts.len() < 2 {
-                    println!("Usage: update <path>");
-                    continue;
-                }
-                let path = parts[1];
-                update_publisher(&client, path).await;
-                print_path_tree(&client).await;
-            }
             "remove" => {
                 if parts.len() < 2 {
                     println!("Usage: remove <path>");
@@ -124,7 +114,6 @@ async fn main() -> anyhow::Result<()> {
 fn show_help() {
     println!("Available commands:");
     println!("  register <path>    - Register a demo publisher at path");
-    println!("  update <path>      - Update publisher at path");
     println!("  remove <path>      - Remove publisher at path");
     println!("  info <path>        - Get publisher info at path");
     println!("  print              - Print current path tree");
@@ -146,11 +135,15 @@ async fn print_path_tree(client: &AgoraClient) {
 }
 
 async fn register_publisher(client: &AgoraClient, path: &str) {
-    let publisher = PublisherInfo::new("demo");
-
-    match client.register_publisher(publisher, path.to_string()).await {
-        Ok(()) => {
-            println!("✅ Successfully registered publisher at '{}'", path);
+    match client
+        .register_publisher("demo".to_string(), path.to_string())
+        .await
+    {
+        Ok(publisher_info) => {
+            println!(
+                "✅ Successfully registered publisher at '{}': {:?}",
+                path, publisher_info
+            );
         }
         Err(e) => {
             println!("❌ Failed to register publisher: {}", e);
@@ -158,23 +151,13 @@ async fn register_publisher(client: &AgoraClient, path: &str) {
     }
 }
 
-async fn update_publisher(client: &AgoraClient, path: &str) {
-    let publisher = PublisherInfo::new("demo-updated");
-
-    match client.update_publisher(publisher, path.to_string()).await {
-        Ok(()) => {
-            println!("✅ Successfully updated publisher at '{}'", path);
-        }
-        Err(e) => {
-            println!("❌ Failed to update publisher: {}", e);
-        }
-    }
-}
-
 async fn remove_publisher(client: &AgoraClient, path: &str) {
     match client.remove_publisher(path.to_string()).await {
-        Ok(()) => {
-            println!("✅ Successfully removed publisher at '{}'", path);
+        Ok(removed_publisher) => {
+            println!(
+                "✅ Successfully removed publisher at '{}': {:?}",
+                path, removed_publisher
+            );
         }
         Err(e) => {
             println!("❌ Failed to remove publisher: {}", e);

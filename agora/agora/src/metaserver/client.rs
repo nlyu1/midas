@@ -1,7 +1,7 @@
-use super::common::{AgoraMetaClient, DEFAULT_PORT};
+use super::protocol::{AgoraMetaClient, DEFAULT_PORT};
 use super::publisher_info::PublisherInfo;
 use crate::utils::OrError;
-use crate::utils::pathtree::{TreeNode, TreeNodeRef, TreeTrait};
+use crate::utils::{TreeNode, TreeNodeRef, TreeTrait};
 use std::net::{IpAddr, Ipv6Addr};
 use tarpc::{client, context, tokio_serde::formats::Json};
 
@@ -9,6 +9,7 @@ pub struct AgoraClient {
     client: AgoraMetaClient,
 }
 
+// Wrapper around tarpc-generated AgoraMetaClient to have persistent connection.
 impl AgoraClient {
     pub async fn new(port: Option<u16>) -> anyhow::Result<Self> {
         let server_addr = (
@@ -21,21 +22,14 @@ impl AgoraClient {
         Ok(Self { client })
     }
 
-    pub async fn register_publisher(&self, publisher: PublisherInfo, path: String) -> OrError<()> {
+    pub async fn register_publisher(&self, name: String, path: String) -> OrError<PublisherInfo> {
         self.client
-            .register_publisher(context::current(), publisher, path)
+            .register_publisher(context::current(), name, path)
             .await
             .map_err(|e| format!("RPC error: {}", e))?
     }
 
-    pub async fn update_publisher(&self, publisher: PublisherInfo, path: String) -> OrError<()> {
-        self.client
-            .update_publisher(context::current(), publisher, path)
-            .await
-            .map_err(|e| format!("RPC error: {}", e))?
-    }
-
-    pub async fn remove_publisher(&self, path: String) -> OrError<()> {
+    pub async fn remove_publisher(&self, path: String) -> OrError<PublisherInfo> {
         self.client
             .remove_publisher(context::current(), path)
             .await

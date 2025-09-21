@@ -1,24 +1,20 @@
-use agora::metaserver::{AgoraMetaServer, PublisherInfo};
-use agora::utils::{TreeNode, TreeTrait};
+use agora::metaserver::ServerState;
+use agora::utils::TreeTrait;
 
-fn create_test_instance() -> Metaserver {
-    let process = Metaserver::new("test_server", 8080);
+fn create_test_instance() -> ServerState {
+    let state = ServerState::new();
 
     // Create a basic tree structure for testing
-    process
-        .path_tree()
-        .add_children(&["api", "static", "admin"]);
-    let api = process.path_tree().get_child("api").unwrap();
+    state.path_tree().add_children(&["api", "static", "admin"]);
+    let api = state.path_tree().get_child("api").unwrap();
     api.add_children(&["v1", "v2"]);
     let v1 = api.get_child("v1").unwrap();
     v1.add_children(&["users", "posts", "auth"]);
 
-    process
+    state
 }
 
-fn create_test_publisher() -> PublisherInfo {
-    PublisherInfo::new("test_publisher")
-}
+// No longer needed - publishers are created during registration
 
 #[cfg(test)]
 mod tests {
@@ -27,26 +23,30 @@ mod tests {
     #[test]
     fn publisher_register_success() {
         let mut process = create_test_instance();
-        let publisher = create_test_publisher();
 
         // Test registering a new publisher at a path that doesn't exist in tree yet
-        let result = process.register_publisher(&publisher, "new/endpoint");
+        let result =
+            process.register_publisher("test_publisher".to_string(), "new/endpoint".to_string());
         assert!(
             result.is_ok(),
             "Should successfully register publisher at new path"
         );
+        let publisher_info = result.unwrap();
+        assert_eq!(publisher_info.name(), "test_publisher");
 
         // Test registering at another new path
-        let publisher2 = PublisherInfo::new("another_publisher");
-        let result2 = process.register_publisher(&publisher2, "different/path");
+        let result2 = process.register_publisher(
+            "another_publisher".to_string(),
+            "different/path".to_string(),
+        );
         assert!(
             result2.is_ok(),
             "Should successfully register publisher at different new path"
         );
 
         // Test registering at root level for non-existent path
-        let publisher3 = PublisherInfo::new("root_publisher");
-        let result3 = process.register_publisher(&publisher3, "nonexistent");
+        let result3 =
+            process.register_publisher("root_publisher".to_string(), "nonexistent".to_string());
         assert!(
             result3.is_ok(),
             "Should successfully register publisher at new root path"
@@ -56,40 +56,30 @@ mod tests {
     #[test]
     fn publisher_register_fail() {
         let mut process = create_test_instance();
-        let publisher = create_test_publisher();
 
-        // Try to register at a path that already exists in the tree - should fail
-        let result = process.register_publisher(&publisher, "api/v1/users");
+        // Try to register with empty path - should fail
+        let empty_path_result =
+            process.register_publisher("test_publisher".to_string(), "".to_string());
         assert!(
-            result.is_err(),
-            "Should fail to register publisher at existing path"
+            empty_path_result.is_err(),
+            "Should fail to register with empty path"
         );
         assert!(
-            result.unwrap_err().contains("already exists"),
-            "Error message should indicate path already exists"
-        );
-
-        // Try to register at another existing path
-        let result2 = process.register_publisher(&publisher, "admin");
-        assert!(
-            result2.is_err(),
-            "Should fail to register publisher at existing root path"
-        );
-        assert!(
-            result2.unwrap_err().contains("already exists"),
-            "Error message should indicate path already exists"
+            empty_path_result.unwrap_err().contains("cannot be empty"),
+            "Error message should indicate path cannot be empty"
         );
 
         // Register at a valid new path first
-        let valid_result = process.register_publisher(&publisher, "new/path");
+        let valid_result =
+            process.register_publisher("test_publisher".to_string(), "new/path".to_string());
         assert!(
             valid_result.is_ok(),
             "Should succeed to register at new path"
         );
 
         // Try to register at same path again - should fail due to duplicate registration
-        let publisher2 = PublisherInfo::new("duplicate_publisher");
-        let duplicate_result = process.register_publisher(&publisher2, "new/path");
+        let duplicate_result =
+            process.register_publisher("duplicate_publisher".to_string(), "new/path".to_string());
         assert!(
             duplicate_result.is_err(),
             "Should fail to register duplicate at same path"
@@ -101,100 +91,150 @@ mod tests {
     }
 
     #[test]
-    fn publisher_update_success() {
+    fn publisher_register_fail_parent_is_publisher() {
         let mut process = create_test_instance();
-        let publisher = create_test_publisher();
 
-        // First register a publisher at a new path (not in existing tree)
-        let result = process.register_publisher(&publisher, "new/endpoint");
-        assert!(result.is_ok(), "Initial registration should succeed");
-
-        // Add the path to the tree so update can work
-        process.path_tree().add_child(TreeNode::new("new"));
-        let new_node = process.path_tree().get_child("new").unwrap();
-        new_node.add_child(TreeNode::new("endpoint"));
-
-        // Now update the publisher - should succeed because path exists in tree AND publisher is registered
-        let updated_publisher = PublisherInfo::new("updated_publisher");
-        let result2 = process.update_publisher(&updated_publisher, "new/endpoint");
+        // First register a publisher at "dir"
+        let dir_result = process.register_publisher("dir_publisher".to_string(), "dir".to_string());
         assert!(
-            result2.is_ok(),
-            "Should successfully update existing publisher"
+            dir_result.is_ok(),
+            "Should successfully register publisher at 'dir'"
         );
 
-        // Test updating at an existing tree path with registered publisher
-        let root_publisher = PublisherInfo::new("root_publisher");
-        // Register at a path not in tree first
-        process
-            .register_publisher(&root_publisher, "newroot")
-            .unwrap();
-        // Add to tree
-        process.path_tree().add_child(TreeNode::new("newroot"));
-        // Now update should work
-        let updated_root = PublisherInfo::new("updated_root_publisher");
-        let result3 = process.update_publisher(&updated_root, "newroot");
+        // Now try to register a publisher at "dir/content" - should fail
+        // because "dir" is already a publisher and should be a directory only
+        let content_result =
+            process.register_publisher("content_publisher".to_string(), "dir/content".to_string());
         assert!(
-            result3.is_ok(),
-            "Should successfully update publisher at root level"
+            content_result.is_err(),
+            "Should fail to register under path that has a publisher"
+        );
+        assert!(
+            content_result
+                .unwrap_err()
+                .contains("associated with a publisher"),
+            "Error message should indicate parent path is associated with a publisher"
+        );
+
+        // Also test that it fails for deeper nesting: "dir/sub/content" should also fail
+        // because "dir" is a publisher
+        let deep_content_result = process.register_publisher(
+            "deep_content_publisher".to_string(),
+            "dir/sub/content".to_string(),
+        );
+        assert!(
+            deep_content_result.is_err(),
+            "Should fail to register under deep path when parent is a publisher"
+        );
+        assert!(
+            deep_content_result
+                .unwrap_err()
+                .contains("associated with a publisher"),
+            "Error message should indicate parent path 'dir' is associated with a publisher"
         );
     }
 
     #[test]
-    fn publisher_update_fail() {
+    fn publisher_register_child_then_parent_fails() {
         let mut process = create_test_instance();
-        let publisher = create_test_publisher();
 
-        // Try to update a publisher at a path that doesn't exist in tree
-        let result = process.update_publisher(&publisher, "nonexistent/path");
+        // First register a publisher at a deeper path "parent/child"
+        let child_result =
+            process.register_publisher("child_publisher".to_string(), "parent/child".to_string());
         assert!(
-            result.is_err(),
-            "Should fail to update publisher at nonexistent path"
-        );
-        assert!(
-            result.unwrap_err().contains("does not exist"),
-            "Error message should indicate path does not exist"
+            child_result.is_ok(),
+            "Should successfully register publisher at 'parent/child'"
         );
 
-        // Try to update a publisher that exists in tree but is not registered
-        let result2 = process.update_publisher(&publisher, "api/v1/posts");
+        // Now try to register a publisher at "parent" - this should fail
+        // because "parent" already exists as a directory in the tree (created during child registration)
+        // Publishers can only be registered at new paths, not existing directory nodes
+        let parent_result =
+            process.register_publisher("parent_publisher".to_string(), "parent".to_string());
         assert!(
-            result2.is_err(),
-            "Should fail to update unregistered publisher"
+            parent_result.is_err(),
+            "Should fail to register at path that already exists as directory"
         );
         assert!(
-            result2.unwrap_err().contains("not registered"),
-            "Error message should indicate publisher not registered"
+            parent_result
+                .unwrap_err()
+                .contains("already exists as a directory"),
+            "Error message should indicate path already exists as directory"
+        );
+    }
+
+    #[test]
+    fn publisher_register_fail_existing_directory() {
+        let mut process = create_test_instance();
+        // Publisher created during registration
+
+        // Try to register at paths that already exist in the initial tree structure
+        // These should fail because they're already directory nodes
+
+        // Try to register at "api" - should fail
+        let api_result =
+            process.register_publisher("test_publisher".to_string(), "api".to_string());
+        assert!(
+            api_result.is_err(),
+            "Should fail to register at existing directory 'api'"
+        );
+        assert!(
+            api_result
+                .unwrap_err()
+                .contains("already exists as a directory"),
+            "Error message should indicate path already exists as directory"
         );
 
-        // Test with empty path - this should return the root, but no publisher registered there
-        let result3 = process.update_publisher(&publisher, "");
+        // Try to register at "api/v1" - should fail
+        let api_v1_result =
+            process.register_publisher("test_publisher2".to_string(), "api/v1".to_string());
         assert!(
-            result3.is_err(),
-            "Should fail to update publisher with empty path"
+            api_v1_result.is_err(),
+            "Should fail to register at existing directory 'api/v1'"
         );
         assert!(
-            result3.unwrap_err().contains("not registered"),
-            "Error message should indicate publisher not registered"
+            api_v1_result
+                .unwrap_err()
+                .contains("already exists as a directory"),
+            "Error message should indicate path already exists as directory"
         );
 
-        // Test updating after registering but then path becomes invalid due to tree changes
-        process.register_publisher(&publisher, "temp/path").unwrap();
-        // Add path to tree temporarily
-        process.path_tree().add_child(TreeNode::new("temp"));
-        let temp_node = process.path_tree().get_child("temp").unwrap();
-        temp_node.add_child(TreeNode::new("path"));
-        // Remove the path from tree
-        process.path_tree().remove_child("temp").unwrap();
-        // Now update should fail because path no longer exists in tree
-        let updated_publisher = PublisherInfo::new("updated");
-        let result4 = process.update_publisher(&updated_publisher, "temp/path");
+        // Try to register at "api/v1/users" - should fail
+        let users_result =
+            process.register_publisher("test_publisher3".to_string(), "api/v1/users".to_string());
         assert!(
-            result4.is_err(),
-            "Should fail to update when path removed from tree"
+            users_result.is_err(),
+            "Should fail to register at existing directory 'api/v1/users'"
         );
         assert!(
-            result4.unwrap_err().contains("does not exist"),
-            "Error message should indicate path does not exist"
+            users_result
+                .unwrap_err()
+                .contains("already exists as a directory"),
+            "Error message should indicate path already exists as directory"
         );
+    }
+
+    #[test]
+    fn empty_path_validation() {
+        let mut process = create_test_instance();
+        // Publisher created during registration
+
+        // Test that all operations reject empty paths
+
+        // Register with empty path
+        let register_result =
+            process.register_publisher("test_publisher".to_string(), "".to_string());
+        assert!(register_result.is_err());
+        assert!(register_result.unwrap_err().contains("cannot be empty"));
+
+        // Remove with empty path
+        let remove_result = process.remove_publisher("".to_string());
+        assert!(remove_result.is_err());
+        assert!(remove_result.unwrap_err().contains("cannot be empty"));
+
+        // Get publisher info with empty path
+        let info_result = process.get_publisher_info("".to_string());
+        assert!(info_result.is_err());
+        assert!(info_result.unwrap_err().contains("cannot be empty"));
     }
 }
