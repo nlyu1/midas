@@ -1,5 +1,11 @@
-pub mod server;
-pub use server::Metaserver;
+mod server;
+pub use server::AgoraMetaServer;
 
-pub mod publisher_info;
+mod publisher_info;
 pub use publisher_info::PublisherInfo;
+
+mod client;
+pub use client::AgoraClient;
+
+mod common;
+pub use common::{AgoraMeta, DEFAULT_PORT};

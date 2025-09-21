@@ -1,11 +1,11 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::net::{IpAddr, Ipv6Addr};
 // "client" contains utilities like `Config`
 // "context" provides request-scoped metadata.
 // "tokio::serde" specifies transport format.
 use tarpc::{client, context, tokio_serde::formats::Json};
 // Pulls macro-generated client module from `lib`
-use crate::WorldClient;
+use super::common::WorldClient;
 
 // Clap helps parse command line arguments
 #[derive(Parser, Debug)]

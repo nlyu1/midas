@@ -1,4 +1,4 @@
-use agora::metaserver::{Metaserver, PublisherInfo};
+use agora::metaserver::{AgoraMetaServer, PublisherInfo};
 use agora::utils::{TreeNode, TreeTrait};
 
 fn create_test_instance() -> Metaserver {

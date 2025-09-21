@@ -1,6 +1,3 @@
-pub mod client;
-pub mod server;
-
 #[tarpc::service]
 pub trait World {
     /// Returns a greeting for name.

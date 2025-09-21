@@ -8,12 +8,8 @@ name = "tarpc_example"
 path = "src/lib.rs"
 
 [[bin]]
-name = "tarpc-tutorial-client"
-path = "src/client.rs"
-
-[[bin]]
-name = "tarpc-tutorial-server"
-path = "src/server.rs"
+name = "main"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.99"

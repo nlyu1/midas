@@ -164,4 +164,89 @@ mod tests {
             "main.rs should have src as parent"
         );
     }
+
+    #[test]
+    fn repr_conversion() {
+        use agora::utils::TreeTrait;
+
+        // Test 1: create_test_sample can be converted to & from repr
+        let original = create_test_sample();
+        let repr = original.to_repr();
+
+        println!("\nOriginal tree representation: {}", repr);
+
+        // Convert back from representation
+        let reconstructed =
+            TreeNode::from_repr(&repr).expect("Should be able to reconstruct from repr");
+
+        // Verify the reconstructed tree has the same structure
+        assert_eq!(
+            original.name(),
+            reconstructed.name(),
+            "Root names should match"
+        );
+        assert_eq!(
+            original.children().len(),
+            reconstructed.children().len(),
+            "Root should have same number of children"
+        );
+
+        // Check some specific paths exist in both
+        assert!(
+            original.get_child("src").is_ok(),
+            "Original should have src"
+        );
+        assert!(
+            reconstructed.get_child("src").is_ok(),
+            "Reconstructed should have src"
+        );
+        assert!(
+            original.get_child("src/main.rs").is_ok(),
+            "Original should have src/main.rs"
+        );
+        assert!(
+            reconstructed.get_child("src/main.rs").is_ok(),
+            "Reconstructed should have src/main.rs"
+        );
+        assert!(
+            original.get_child("target/debug").is_ok(),
+            "Original should have target/debug"
+        );
+        assert!(
+            reconstructed.get_child("target/debug").is_ok(),
+            "Reconstructed should have target/debug"
+        );
+
+        // Test 2: after tampering with the string, things fail
+
+        // Test case 1: Invalid quote structure
+        let tampered_repr1 = repr.replace("\"project\"", "project");
+        assert!(
+            TreeNode::from_repr(&tampered_repr1).is_err(),
+            "Should fail with missing quotes"
+        );
+
+        // Test case 2: Malformed brackets
+        let tampered_repr2 = repr.replace("[", "(");
+        assert!(
+            TreeNode::from_repr(&tampered_repr2).is_err(),
+            "Should fail with wrong brackets"
+        );
+
+        // Test case 3: Missing colon
+        let tampered_repr3 = repr.replace(":", "");
+        assert!(
+            TreeNode::from_repr(&tampered_repr3).is_err(),
+            "Should fail with missing colon"
+        );
+
+        // Test case 4: Completely invalid string
+        let invalid_repr = "this is not a valid tree representation";
+        assert!(
+            TreeNode::from_repr(&invalid_repr).is_err(),
+            "Should fail with completely invalid string"
+        );
+
+        println!("All repr conversion tests passed!");
+    }
 }
