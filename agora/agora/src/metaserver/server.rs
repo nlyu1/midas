@@ -1,15 +1,16 @@
 use super::protocol::{AgoraMeta, DEFAULT_PORT};
-use super::publisher_info::PublisherInfo;
+use super::publisher_info::{DEFAULT_HEARTBEAT_PORT, DEFAULT_SERVICE_PORT, PublisherInfo};
 use crate::utils::{OrError, PublisherAddressManager, TreeNode, TreeNodeRef, TreeTrait};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use tarpc::context;
+use tarpc::server::incoming::Incoming;
 
-use futures::{future, prelude::*};
+use futures::prelude::*;
 use tarpc::{
-    server::{self, Channel, incoming::Incoming},
+    server::{self, Channel},
     tokio_serde::formats::Json,
 };
 
@@ -64,7 +65,10 @@ impl ServerState {
 
         // Try allocating address for publisher. If succeeded, register
         let service_address = self.address_manager.allocate_publisher_address()?;
-        let publisher_info = PublisherInfo::new(&name, service_address, 8080);
+        let service_socket = SocketAddrV6::new(service_address, DEFAULT_SERVICE_PORT, 0, 0);
+        let heartbeat_socket = SocketAddrV6::new(service_address, DEFAULT_HEARTBEAT_PORT, 0, 0);
+
+        let publisher_info = PublisherInfo::new(&name, service_socket, heartbeat_socket);
         println!(
             "Registered publisher {:?} at path {}",
             publisher_info, &path
@@ -253,9 +257,9 @@ impl AgoraMeta for AgoraMetaServer {
         state.remove_publisher(path)
     }
 
-    async fn path_tree(self, _: context::Context) -> OrError<String> {
+    async fn path_tree(self, _: context::Context) -> String {
         let state = self.state.lock().unwrap();
-        Ok(state.get_path_tree_repr())
+        state.get_path_tree_repr()
     }
 
     async fn publisher_info(self, _: context::Context, path: String) -> OrError<PublisherInfo> {
@@ -287,7 +291,7 @@ impl AgoraMetaServer {
         // Listener yields a stream of connections. Each connection is a stream of requests.
         listener
             // Ignore accept errors.
-            .filter_map(|r| future::ready(r.ok()))
+            .filter_map(|r| futures::future::ready(r.ok()))
             .map(server::BaseChannel::with_defaults)
             // Limit channels to 1 per IP.
             .max_channels_per_key(1, |t| t.transport().peer_addr().unwrap().ip())
@@ -300,8 +304,7 @@ impl AgoraMetaServer {
                 channel.execute(server.serve()).for_each(
                     // Async wrapper around tokio::spawn
                     |fut| async {
-                        // tokio::spawn(fut);
-                        fut.await;
+                        fut.await; // Sequentially wait for each future to complete
                     },
                 )
             })

@@ -41,7 +41,7 @@ impl AgoraClient {
             .client
             .path_tree(context::current())
             .await
-            .map_err(|e| format!("RPC error: {}", e))??;
+            .map_err(|e| format!("RPC error: {}", e))?;
 
         // Reconstruct TreeNodeRef from string representation
         println!("Tree representation: {}", tree_repr);

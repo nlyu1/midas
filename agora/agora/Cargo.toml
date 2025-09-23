@@ -29,3 +29,4 @@ rand_distr = "0.5.1"
 serde = { version = "1.0.222", features = ["derive"] }
 tarpc = { version = "0.37.0", features = ["full"] }
 tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread"] }
+tokio-stream = { version = "0.1.17", features = ["sync"] }

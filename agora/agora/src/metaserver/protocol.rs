@@ -10,7 +10,7 @@ pub trait AgoraMeta {
     /// Removes a publisher from the specified path.
     async fn remove_publisher(path: String) -> OrError<PublisherInfo>;
     /// Returns the path tree as a string representation.
-    async fn path_tree() -> OrError<String>;
+    async fn path_tree() -> String;
     /// Retrieves publisher information for the specified path.
     async fn publisher_info(path: String) -> OrError<PublisherInfo>;
 }

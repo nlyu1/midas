@@ -18,6 +18,7 @@ pub trait TreeTrait {
     fn add_child(self: &Rc<Self>, child: TreeNodeRef);
     fn get_child(self: &Rc<Self>, path: &str) -> OrError<TreeNodeRef>;
     fn remove_child(self: &Rc<Self>, name: &str) -> OrError<()>;
+    fn remove_child_and_branch(self: &Rc<Self>, path: &str) -> OrError<()>;
     fn parent(&self) -> OrError<TreeNodeRef>;
     fn root(self: &Rc<Self>) -> TreeNodeRef;
     fn children(&self) -> Vec<TreeNodeRef>;
@@ -83,6 +84,22 @@ impl TreeTrait for TreeNode {
         let child = self.get_child(&path)?;
         let child_name = child.name();
         child.parent()?.remove_immediate_child(child_name)
+    }
+
+    // Removes entire branch of a leaf node
+    // Asserts that child is leaf, and removes until the first branch
+    fn remove_child_and_branch(self: &TreeNodeRef, path: &str) -> OrError<()> {
+        let child = self.get_child(path)?;
+        if child.is_root() {
+            return Err(format!("Cannot remove root node"));
+        }
+        if !child.is_leaf() {
+            return Err(format!("Cannot remove non-leaf node"));
+        }
+        // Returns the closest-to-root node that has more than one child, as well as name of the branch
+        let (branching_ancestor, branch_name) = child.branching_ancestor()?;
+        branching_ancestor.remove_immediate_child(&branch_name)?;
+        Ok(())
     }
 
     fn parent(&self) -> OrError<TreeNodeRef> {
@@ -202,6 +219,25 @@ impl TreeNode {
         } else {
             Ok(())
         }
+    }
+
+    // Returns the closest-to-root node whose child path contains the current node
+    // Asserts that this is not the root; this should have been handled on the top-level
+    fn branching_ancestor(self: &Rc<Self>) -> OrError<(TreeNodeRef, String)> {
+        assert!(
+            !self.is_root(),
+            "Helper should not have been called on root node. Fix bug."
+        );
+        let parent = self.parent().unwrap();
+        if parent.is_root() {
+            return Ok((parent, self.name.clone()));
+        }
+        // If parent has more than one child, then it's the immediate branching ancestor
+        if parent.children().len() > 1 {
+            return Ok((parent, self.name.clone()));
+        }
+        // Otherwise, keep looking up the tree
+        parent.branching_ancestor()
     }
 
     fn to_repr_helper(&self) -> String {

@@ -13,6 +13,18 @@ fn create_test_sample() -> Rc<TreeNode> {
     return root;
 }
 
+fn create_test_sample_with_branch() -> Rc<TreeNode> {
+    let root = TreeNode::new("project");
+    root.add_children(&["src", "test"]);
+    let src = root.get_child("src").unwrap();
+    let test = root.get_child("test").unwrap();
+    src.add_children(&["main.rs"]);
+    test.add_children(&["test_folder", "test_file"]);
+    let folder1 = test.get_child("test_folder").unwrap();
+    folder1.add_children(&["test.rs"]);
+    return root;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,6 +158,38 @@ mod tests {
             tree_output, expected,
             "Tree structure should match expected format"
         );
+    }
+
+    #[test]
+    fn branching_ancestor_test() {
+        let root = create_test_sample_with_branch();
+        assert_eq!(
+            root.to_string(),
+            "└── project\n    ├── src\n    │   └── main.rs\n    └── test\n        ├── test_folder\n        │   └── test.rs\n        └── test_file",
+            "Tree structure should match expected format"
+        );
+        assert_eq!(
+            root.remove_child_and_branch("test/test_folder"),
+            Err(format!("Cannot remove non-leaf node")),
+        );
+        // Removing root should fail
+        match root.remove_child_and_branch("") {
+            Err(_) => (),
+            Ok(_) => panic!("should not be able to remove root"),
+        }
+        root.remove_child_and_branch("src/main.rs").unwrap();
+        assert_eq!(
+            root.to_string(),
+            "└── project\n    └── test\n        ├── test_folder\n        │   └── test.rs\n        └── test_file"
+        );
+        root.remove_child_and_branch("test/test_file").unwrap();
+        assert_eq!(
+            root.to_string(),
+            "└── project\n    └── test\n        └── test_folder\n            └── test.rs"
+        );
+        root.remove_child_and_branch("test/test_folder/test.rs")
+            .unwrap();
+        assert_eq!(root.to_string(), "└── project");
     }
 
     #[test]

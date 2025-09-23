@@ -30,6 +30,7 @@ dependencies = [
  "serde",
  "tarpc",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -2045,6 +2046,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
