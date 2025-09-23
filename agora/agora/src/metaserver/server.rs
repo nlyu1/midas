@@ -88,7 +88,7 @@ impl ServerState {
             Some(publisher_info) => {
                 // Try to remove the path from the tree if it exists
                 if let Ok(_) = self.path_tree.get_child(&path) {
-                    if let Err(e) = self.path_tree.remove_child(&path) {
+                    if let Err(e) = self.path_tree.remove_child_and_branch(&path) {
                         // Don't fail the operation if tree removal fails
                         eprintln!("TreeNode operation failed: {}", e);
                     }
