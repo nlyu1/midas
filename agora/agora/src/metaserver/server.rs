@@ -1,5 +1,7 @@
 use super::protocol::{AgoraMeta, DEFAULT_PORT};
-use super::publisher_info::{DEFAULT_HEARTBEAT_PORT, DEFAULT_SERVICE_PORT, PublisherInfo};
+use super::publisher_info::{
+    DEFAULT_HEARTBEAT_PORT, DEFAULT_SERVICE_PORT, DEFAULT_STRING_PORT, PublisherInfo,
+};
 use crate::utils::{OrError, PublisherAddressManager, TreeNode, TreeNodeRef, TreeTrait};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -66,9 +68,11 @@ impl ServerState {
         // Try allocating address for publisher. If succeeded, register
         let service_address = self.address_manager.allocate_publisher_address()?;
         let service_socket = SocketAddrV6::new(service_address, DEFAULT_SERVICE_PORT, 0, 0);
+        let string_socket = SocketAddrV6::new(service_address, DEFAULT_STRING_PORT, 0, 0);
         let heartbeat_socket = SocketAddrV6::new(service_address, DEFAULT_HEARTBEAT_PORT, 0, 0);
 
-        let publisher_info = PublisherInfo::new(&name, service_socket, heartbeat_socket);
+        let publisher_info =
+            PublisherInfo::new(&name, service_socket, string_socket, heartbeat_socket);
         println!(
             "Registered publisher {:?} at path {}",
             publisher_info, &path

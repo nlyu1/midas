@@ -2,6 +2,7 @@ use crate::utils::{OrError, PublisherAddressManager};
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 
 pub const DEFAULT_SERVICE_PORT: u16 = 8081;
+pub const DEFAULT_STRING_PORT: u16 = 8082;
 pub const DEFAULT_HEARTBEAT_PORT: u16 = 8082;
 
 #[derive(Debug, PartialEq, Eq, Clone, serde::Serialize, serde::Deserialize)]
@@ -10,14 +11,21 @@ pub struct PublisherInfo {
     // address: Ipv6Addr,
     // port: u16,
     service_socket: SocketAddrV6,
+    string_socket: SocketAddrV6,
     heartbeat_socket: SocketAddrV6,
 }
 
 impl PublisherInfo {
-    pub fn new(name: &str, service_socket: SocketAddrV6, heartbeat_socket: SocketAddrV6) -> Self {
+    pub fn new(
+        name: &str,
+        service_socket: SocketAddrV6,
+        string_socket: SocketAddrV6,
+        heartbeat_socket: SocketAddrV6,
+    ) -> Self {
         Self {
             name: name.to_string(),
             service_socket,
+            string_socket,
             heartbeat_socket,
         }
     }
@@ -27,9 +35,11 @@ impl PublisherInfo {
         let address = manager.allocate_publisher_address()?;
         let service_socket = SocketAddrV6::new(address, DEFAULT_SERVICE_PORT, 0, 0);
         let heartbeat_socket = SocketAddrV6::new(address, DEFAULT_HEARTBEAT_PORT, 0, 0);
+        let string_socket = SocketAddrV6::new(address, DEFAULT_STRING_PORT, 0, 0);
         Ok(Self {
             name: name.to_string(),
             service_socket,
+            string_socket,
             heartbeat_socket,
         })
     }
@@ -39,6 +49,7 @@ impl PublisherInfo {
         Self {
             name: "demo".to_string(),
             service_socket: SocketAddrV6::new(demo_addr, DEFAULT_SERVICE_PORT, 0, 0),
+            string_socket: SocketAddrV6::new(demo_addr, DEFAULT_STRING_PORT, 0, 0),
             heartbeat_socket: SocketAddrV6::new(demo_addr, DEFAULT_HEARTBEAT_PORT, 0, 0),
         }
     }
@@ -59,13 +70,27 @@ impl PublisherInfo {
         )
     }
 
+    /// Get the socket address for string connections
+    pub fn string_socket_addr(&self) -> (IpAddr, u16) {
+        (
+            IpAddr::V6(self.string_socket.ip().clone()),
+            self.string_socket.port(),
+        )
+    }
+
     /// Get a human-readable connection string
     pub fn connection_string(&self) -> String {
         let (service_address, service_port) = self.service_socket_addr();
         let (heartbeat_address, heartbeat_port) = self.heartbeat_socket_addr();
+        let (string_address, string_port) = self.string_socket_addr();
         format!(
-            "(bytestream [{}]:{}, heartbeat [{}]:{})",
-            service_address, service_port, heartbeat_address, heartbeat_port
+            "(bytestream [{}]:{}, heartbeat [{}]:{}, string [{}]:{})",
+            service_address,
+            service_port,
+            heartbeat_address,
+            heartbeat_port,
+            string_address,
+            string_port
         )
     }
 
