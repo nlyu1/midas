@@ -58,7 +58,7 @@ impl PingServer {
             listener
                 .filter_map(|r| futures::future::ready(r.ok()))
                 .map(server::BaseChannel::with_defaults)
-                .max_channels_per_key(1, |t| t.transport().peer_addr().unwrap().ip())
+                .max_channels_per_key(1024 * 1024, |t| t.transport().peer_addr().unwrap().ip())
                 .map(|channel| {
                     let server = PingRpcServer::new(Arc::clone(&shared_payload));
                     channel.execute(server.serve()).for_each(|fut| async {

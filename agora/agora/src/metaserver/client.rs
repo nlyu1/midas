@@ -27,6 +27,14 @@ impl AgoraClient {
         result
     }
 
+    pub async fn confirm_publisher(&self, path: String) -> OrError<()> {
+        let result = self.client
+            .confirm_publisher(context::current(), path)
+            .await
+            .map_err(|e| format!("RPC error: {}", e))?;
+        result
+    }
+
     pub async fn remove_publisher(&self, path: String) -> OrError<PublisherInfo> {
         let result = self.client
             .remove_publisher(context::current(), path)

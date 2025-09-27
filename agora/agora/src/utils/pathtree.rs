@@ -1,26 +1,25 @@
 use crate::utils::OrError;
-use std::cell::RefCell;
 use std::fmt;
-use std::rc::{Rc, Weak};
+use std::sync::{Arc, Weak, Mutex};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct TreeNode {
     name: String,
-    children: RefCell<Vec<Rc<TreeNode>>>,
-    parent: RefCell<Option<Weak<TreeNode>>>,
+    children: Mutex<Vec<Arc<TreeNode>>>,
+    parent: Mutex<Option<Weak<TreeNode>>>,
 }
 
-pub type TreeNodeRef = Rc<TreeNode>;
+pub type TreeNodeRef = Arc<TreeNode>;
 
 pub trait TreeTrait {
-    fn new(name: &str) -> Rc<Self>;
-    fn add_children(self: &Rc<Self>, names: &[&str]);
-    fn add_child(self: &Rc<Self>, child: TreeNodeRef);
-    fn get_child(self: &Rc<Self>, path: &str) -> OrError<TreeNodeRef>;
-    fn remove_child(self: &Rc<Self>, name: &str) -> OrError<()>;
-    fn remove_child_and_branch(self: &Rc<Self>, path: &str) -> OrError<()>;
+    fn new(name: &str) -> Arc<Self>;
+    fn add_children(self: &Arc<Self>, names: &[&str]);
+    fn add_child(self: &Arc<Self>, child: TreeNodeRef);
+    fn get_child(self: &Arc<Self>, path: &str) -> OrError<TreeNodeRef>;
+    fn remove_child(self: &Arc<Self>, name: &str) -> OrError<()>;
+    fn remove_child_and_branch(self: &Arc<Self>, path: &str) -> OrError<()>;
     fn parent(&self) -> OrError<TreeNodeRef>;
-    fn root(self: &Rc<Self>) -> TreeNodeRef;
+    fn root(self: &Arc<Self>) -> TreeNodeRef;
     fn children(&self) -> Vec<TreeNodeRef>;
     fn name(&self) -> &str;
     fn path(&self) -> String;
@@ -32,35 +31,35 @@ pub trait TreeTrait {
 }
 
 impl TreeTrait for TreeNode {
-    fn new(name: &str) -> Rc<Self> {
+    fn new(name: &str) -> Arc<Self> {
         // assert that name does not contain slashes
         assert!(!name.contains('/'), "TreeNode name cannot contain slashes");
-        Rc::new(TreeNode {
+        Arc::new(TreeNode {
             name: name.into(),
-            children: RefCell::new(Vec::new()),
-            parent: RefCell::new(None),
+            children: Mutex::new(Vec::new()),
+            parent: Mutex::new(None),
         })
     }
 
-    fn add_children(self: &Rc<Self>, names: &[&str]) {
+    fn add_children(self: &Arc<Self>, names: &[&str]) {
         // Create children of names as specified; set their parents correctly
         for name in names {
             let child = TreeNode::new(&name);
             // Set parent of child
-            *child.parent.borrow_mut() = Some(Rc::downgrade(self));
+            *child.parent.lock().unwrap() = Some(Arc::downgrade(self));
             // Add child to this node
-            self.children.borrow_mut().push(child);
+            self.children.lock().unwrap().push(child);
         }
     }
 
-    fn add_child(self: &Rc<Self>, child: TreeNodeRef) {
+    fn add_child(self: &Arc<Self>, child: TreeNodeRef) {
         // Set parent of child
-        *child.parent.borrow_mut() = Some(Rc::downgrade(self));
+        *child.parent.lock().unwrap() = Some(Arc::downgrade(self));
         // Add child to this node
-        self.children.borrow_mut().push(child);
+        self.children.lock().unwrap().push(child);
     }
 
-    fn get_child(self: &Rc<Self>, path: &str) -> OrError<TreeNodeRef> {
+    fn get_child(self: &Arc<Self>, path: &str) -> OrError<TreeNodeRef> {
         // Same as "get_child", except might be recursive child1/child2/...
         if path.is_empty() {
             return Ok(self.clone());
@@ -103,21 +102,21 @@ impl TreeTrait for TreeNode {
     }
 
     fn parent(&self) -> OrError<TreeNodeRef> {
-        match self.parent.borrow().as_ref() {
+        match self.parent.lock().unwrap().as_ref() {
             Some(parent) => Ok(parent.upgrade().unwrap()),
             None => Err(format!("Parent not found for '{}'", self.name)),
         }
     }
 
-    fn root(self: &Rc<Self>) -> TreeNodeRef {
+    fn root(self: &Arc<Self>) -> TreeNodeRef {
         match self.parent() {
             Ok(parent) => parent.root(),
-            Err(_) => Rc::clone(self),
+            Err(_) => Arc::clone(self),
         }
     }
 
     fn children(&self) -> Vec<TreeNodeRef> {
-        self.children.borrow().clone()
+        self.children.lock().unwrap().clone()
     }
 
     fn name(&self) -> &str {
@@ -133,11 +132,11 @@ impl TreeTrait for TreeNode {
     }
 
     fn is_root(&self) -> bool {
-        self.parent.borrow().is_none()
+        self.parent.lock().unwrap().is_none()
     }
 
     fn is_leaf(&self) -> bool {
-        self.children.borrow().is_empty()
+        self.children.lock().unwrap().is_empty()
     }
 
     fn display_tree(&self) -> String {
@@ -177,7 +176,7 @@ impl TreeNode {
             format!("{}│   ", prefix) // Vertical bar + three spaces for non-last items
         };
 
-        let children = self.children.borrow();
+        let children = self.children.lock().unwrap();
         let child_count = children.len();
 
         for (i, child) in children.iter().enumerate() {
@@ -188,11 +187,11 @@ impl TreeNode {
         result
     }
 
-    fn get_immediate_child(self: &Rc<Self>, name: &str) -> OrError<TreeNodeRef> {
+    fn get_immediate_child(self: &Arc<Self>, name: &str) -> OrError<TreeNodeRef> {
         // Returns child if exists. Note that modifying child will modify original tree.
         // Change type annotation as necessary to complete this functionality.
         self.children
-            .borrow()
+            .lock().unwrap()
             .iter()
             .find(|child| child.name == name)
             .cloned()
@@ -206,7 +205,7 @@ impl TreeNode {
 
     fn remove_immediate_child(self: &TreeNodeRef, name: &str) -> OrError<()> {
         // Look for "name" if exists and deletes; frees correctly. Else complains [name] not found under [self.path]
-        let mut children = self.children.borrow_mut();
+        let mut children = self.children.lock().unwrap();
         let initial_len = children.len();
 
         children.retain(|child| child.name != name);
@@ -223,7 +222,7 @@ impl TreeNode {
 
     // Returns the closest-to-root node whose child path contains the current node
     // Asserts that this is not the root; this should have been handled on the top-level
-    fn branching_ancestor(self: &Rc<Self>) -> OrError<(TreeNodeRef, String)> {
+    fn branching_ancestor(self: &Arc<Self>) -> OrError<(TreeNodeRef, String)> {
         assert!(
             !self.is_root(),
             "Helper should not have been called on root node. Fix bug."
@@ -243,7 +242,7 @@ impl TreeNode {
     fn to_repr_helper(&self) -> String {
         let children_repr: Vec<String> = self
             .children
-            .borrow()
+            .lock().unwrap()
             .iter()
             .map(|child| child.to_repr_helper())
             .collect();

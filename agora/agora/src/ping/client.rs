@@ -8,6 +8,14 @@ pub struct PingClient {
     client: PingRpcClient,
 }
 
+impl std::fmt::Debug for PingClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PingClient")
+            .field("client", &"PingRpcClient { ... }")
+            .finish()
+    }
+}
+
 impl PingClient {
     pub async fn new(address: Ipv6Addr, port: u16) -> anyhow::Result<Self> {
         let server_addr = (address, port);
@@ -22,7 +30,7 @@ impl PingClient {
             .client
             .ping_latest_value(context::current())
             .await
-            .map_err(|e| format!("Heartbeat Rpc error: {}", e))?;
+            .map_err(|e| format!("Ping Rpc client error: {}", e))?;
         let time_delta = chrono::Utc::now().signed_duration_since(transmit_time);
         Ok((vec, s, time_delta))
     }

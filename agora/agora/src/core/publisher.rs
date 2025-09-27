@@ -16,10 +16,20 @@ pub struct Publisher<T: Agorable> {
 
 impl<T: Agorable> Publisher<T> {
     pub async fn new(name: String, path: String, initial_value: T, metaserver_addr: Ipv6Addr, metaserver_port: u16) -> OrError<Self> {
-        let _metaclient = AgoraClient::new(metaserver_addr, metaserver_port).await
+        let metaclient = AgoraClient::new(metaserver_addr, metaserver_port).await
             .map_err(|e| format!(
                 "AgoraPublisher Error: failed to create _metaclient, make sure to spin up metaserver first: {}", e))?;
-        let publisher_info = _metaclient.register_publisher(name, path).await?;
+        let publisher_info = metaclient.register_publisher(name, path.clone()).await?;
+
+        let (vec_payload, str_payload) = Self::value_to_payloads(&initial_value)?;
+
+        // This immediately spawns background ping server
+        let pingserver = PingServer::new(
+            publisher_info.ping_socket.ip().clone().into(),
+            publisher_info.ping_socket.port(),
+            vec_payload,
+            str_payload
+        ).map_err(|e| format!("Failed to create ping server: {}", e))?;
         let rawstream_byteserver = RawStreamServer::new(
             publisher_info.service_socket.ip().clone(),
             publisher_info.service_socket.port(),
@@ -29,17 +39,13 @@ impl<T: Agorable> Publisher<T> {
             publisher_info.string_socket.ip().clone(),
             publisher_info.string_socket.port(),
             None
-        ).await.map_err(|e| format!("goraPublisher Error: failed to create string rawstream server: {}", e))?;
-        let (vec_payload, str_payload) = Self::value_to_payloads(&initial_value)?;
-        // This immediately spawns background ping server
-        let pingserver = PingServer::new(
-            publisher_info.ping_socket.ip().clone().into(),
-            publisher_info.ping_socket.port(),
-            vec_payload,
-            str_payload
-        ).map_err(|e| format!("Failed to create ping server: {}", e))?; 
+        ).await.map_err(|e| format!("AgoraPublisher Error: failed to create string rawstream server: {}", e))?;
+
+        // Next, establish handshake with server by asking server to confirm
+        metaclient.confirm_publisher(path).await
+            .map_err(|e| format!("Failed to confirm publisher: {}", e))?;
         Ok(Self {
-            _metaclient,
+            _metaclient : metaclient,
             rawstream_byteserver,
             rawstream_omniserver,
             pingserver,

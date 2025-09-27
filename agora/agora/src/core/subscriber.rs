@@ -19,9 +19,9 @@ pub struct Subscriber<T: Agorable> {
 impl<T: Agorable> Subscriber<T> {
     // It's the user's burden that they're querying paths with the right stuff
     pub async fn new(path: String, metaserver_addr: Ipv6Addr, metaserver_port: u16) -> OrError<Subscriber<T>> {
-        let _metaclient = AgoraClient::new(metaserver_addr, metaserver_port).await
+        let metaclient = AgoraClient::new(metaserver_addr, metaserver_port).await
             .map_err(|e| format!("Failed to create AgoraClient: {}", e))?; 
-        let publisher_info = _metaclient.get_publisher_info(path).await?; 
+        let publisher_info = metaclient.get_publisher_info(path).await?; 
         let rawstreamclient : RawStreamClient<Vec<u8>> = RawStreamClient::new(
             publisher_info.service_socket.ip().clone(),
             publisher_info.service_socket.port(),
@@ -33,7 +33,7 @@ impl<T: Agorable> Subscriber<T> {
         ).await.map_err(|e| format!("Agora subscriber Error: failed to create ping client {}", e))?;
         return Ok(
             Self {
-                _metaclient, 
+                _metaclient : metaclient, 
                 rawstreamclient, 
                 pingclient,
                 _phantom: PhantomData

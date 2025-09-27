@@ -3,7 +3,9 @@ use super::publisher_info::PublisherInfo;
 use crate::ports::{PUBLISHER_SERVICE_PORT, PUBLISHER_OMNISTRING_PORT, PUBLISHER_PING_PORT};
 use crate::utils::{OrError, PublisherAddressManager, TreeNode, TreeNodeRef, TreeTrait};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use crate::ping::PingClient; 
 
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use tarpc::context;
@@ -14,20 +16,28 @@ use tarpc::{
     server::{self, Channel},
     tokio_serde::formats::Json,
 };
+use tokio::time::{interval, Duration};
+
+const CHECK_PUBLISHER_LIVELINESS_EVERY_MS: u64 = 500; 
 
 // Shared server state that will be accessed by all connections
 #[derive(Debug)]
 pub struct ServerState {
     pub path_tree: TreeNodeRef,
     pub publishers: HashMap<String, PublisherInfo>,
+    pub confirmed_publishers: HashMap<String, PingClient>, // For each client, initialize a ping-client
     address_manager: PublisherAddressManager,
 }
+
+// Todo: separate two things for serverState: query new address, and (2) confirm that publisher is running
+// After confirmation, server runs a ping-client. There's also a 
 
 impl ServerState {
     pub fn new() -> Self {
         Self {
             path_tree: TreeNode::new("agora"),
             publishers: HashMap::new(),
+            confirmed_publishers: HashMap::new(), 
             address_manager: PublisherAddressManager::new(),
         }
     }
@@ -80,12 +90,41 @@ impl ServerState {
         Ok(publisher_info)
     }
 
+    pub async fn confirm_publisher(&mut self, path: String) -> OrError<()> {
+        // Checks that publisher has already been registered
+        if !self.publishers.contains_key(&path) {
+            return Err(format!("Metaserver confirmation error: please register path {} before confirming", path));
+        }
+
+        // Checks against duplicate confirmation
+        if self.confirmed_publishers.contains_key(&path) {
+            return Err(format!("Metaserver confirmation error: {} already registered and confirmed", path));
+        }
+
+        // Extract address and port from stored info
+        let publisher_info = self.publishers.get(&path).unwrap();
+        let (publisher_address, publisher_port) = publisher_info.ping_socket_addr();
+
+        // Initialize a ping client
+        let publisher_ipv6 = match publisher_address {
+            std::net::IpAddr::V6(addr) => addr,
+            std::net::IpAddr::V4(_) => return Err("IPv4 addresses not supported for ping client".to_string()),
+        };
+        let pingclient = PingClient::new(publisher_ipv6, publisher_port).await
+            .map_err(|e| format!("Failed to create ping client: {}", e))?;
+        let _ = pingclient.ping().await?; // Make sure that we can ping and obtain results
+
+        // Now that things are ok, add pingclient
+        self.confirmed_publishers.insert(path, pingclient);
+        Ok(())
+    }
+
     pub fn remove_publisher(&mut self, path: String) -> OrError<PublisherInfo> {
         // Validate path format strictly
         self.validate_path_format(&path)?;
 
         // Check if publisher exists and remove it
-        // Note: Due to parent validation, publishers can only exist at leaf nodes,
+        // Note: Due to parent invariant, publishers can only exist at leaf nodes,
         // so we don't need to check for child publishers anymore
         match self.publishers.remove(&path) {
             Some(publisher_info) => {
@@ -96,7 +135,10 @@ impl ServerState {
                         eprintln!("TreeNode operation failed: {}", e);
                     }
                 }
-                println!("Removed publisher {:?} from path {}", publisher_info, &path);
+                match self.confirmed_publishers.remove(&path) {
+                    Some(_) => println!("Removed confirmed publisher {:?} from path {}", publisher_info, &path),
+                    None => println!("Removed publisher {:?} from path {}", publisher_info, &path),
+                } 
                 Ok(publisher_info)
             }
             None => Err(format!(
@@ -110,13 +152,20 @@ impl ServerState {
         self.path_tree.to_repr()
     }
 
-    pub fn get_publisher_info(&self, path: String) -> OrError<PublisherInfo> {
+    pub async fn get_publisher_info(&mut self, path: String) -> OrError<PublisherInfo> {
         // Validate path format strictly
         self.validate_path_format(&path)?;
 
-        match self.publishers.get(&path) {
-            Some(publisher) => Ok(publisher.clone()),
-            None => Err(format!("Publisher not registered at {}", path)),
+        match (self.publishers.get(&path), self.confirmed_publishers.get_mut(&path)) {
+            (Some(publisher), Some(pingclient)) => {
+                pingclient.ping().await
+                    .map_err(|_| format!("Cannot ping {}. Publisher might be stale", path))?;
+                Ok(publisher.clone())
+            },
+            (Some(_), None) => {
+                Err(format!("Publisher at {} is registered but not confirmed", path))
+            },
+            (None, _) => Err(format!("Publisher not registered at {}", path)),
         }
     }
 
@@ -201,6 +250,32 @@ impl ServerState {
         Ok(())
     }
 
+    pub async fn prune_stale_publishers(&mut self) -> Vec<String> {
+        let mut stale_paths = Vec::new();
+
+        // Collect paths to check to avoid borrowing issues
+        let paths_to_check: Vec<String> = self.confirmed_publishers.keys().cloned().collect();
+
+        // Iterate over all confirmed publishers and ping each one
+        for path in paths_to_check {
+            if let Some(ping_client) = self.confirmed_publishers.get_mut(&path) {
+                if let Err(_) = ping_client.ping().await {
+                    // Ping failed, mark as stale
+                    stale_paths.push(path.clone());
+                }
+            }
+        }
+
+        // Remove all stale publishers
+        for path in &stale_paths {
+            if let Err(e) = self.remove_publisher(path.clone()) {
+                eprintln!("Failed to remove stale publisher at {}: {}", path, e);
+            }
+        }
+
+        stale_paths
+    }
+
     fn ensure_path_exists(&mut self, path: &str) -> OrError<()> {
         // Path is already validated, so we can split safely
         let path_parts: Vec<&str> = path.split('/').collect();
@@ -251,23 +326,28 @@ impl AgoraMeta for AgoraMetaServer {
         name: String,
         path: String,
     ) -> OrError<PublisherInfo> {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write().await;
         state.register_publisher(name, path)
     }
 
+    async fn confirm_publisher(self, _: context::Context, path: String) -> OrError<()> {
+        let mut state = self.state.write().await;
+        state.confirm_publisher(path).await
+    }
+
     async fn remove_publisher(self, _: context::Context, path: String) -> OrError<PublisherInfo> {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write().await;
         state.remove_publisher(path)
     }
 
     async fn path_tree(self, _: context::Context) -> String {
-        let state = self.state.read().unwrap();
+        let state = self.state.read().await;
         state.get_path_tree_repr()
     }
 
     async fn publisher_info(self, _: context::Context, path: String) -> OrError<PublisherInfo> {
-        let state = self.state.read().unwrap();
-        state.get_publisher_info(path)
+        let mut state = self.state.write().await;
+        state.get_publisher_info(path).await
     }
 }
 
@@ -289,6 +369,22 @@ impl AgoraMetaServer {
         let mut listener = tarpc::serde_transport::tcp::listen(&server_addr, Json::default).await?;
         println!("Listening on port {}", listener.local_addr().port());
         listener.config_mut().max_frame_length(usize::MAX);
+
+        // Start a background process to obtain write lock on shared_state and prunes. Should execute once every constant (see top) number of ms
+        let pruning_state = Arc::clone(&shared_state);
+        tokio::spawn(async move {
+            let mut interval = interval(Duration::from_millis(CHECK_PUBLISHER_LIVELINESS_EVERY_MS));
+            loop {
+                interval.tick().await;
+                let pruned_paths = {
+                    let mut state = pruning_state.write().await;
+                    state.prune_stale_publishers().await
+                }; // Lock is dropped here
+                if !pruned_paths.is_empty() {
+                    println!("Pruned stale publishers: {:?}", pruned_paths);
+                }
+            }
+        });
 
         // Listener yields a stream of connections. Each connection is a stream of requests.
         listener
