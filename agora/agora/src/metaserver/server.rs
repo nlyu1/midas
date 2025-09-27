@@ -313,7 +313,7 @@ impl AgoraMetaServer {
                 )
             })
             // Max 10 channels.
-            .buffer_unordered(10)
+            .buffer_unordered(32768)
             // for_each runs stream to completion. For this particular case, it will run forever.
             // An example stream which terminates would finite-length stream.
             .for_each(|_| async {})

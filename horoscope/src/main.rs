@@ -9,7 +9,7 @@ async fn main() {
     let tickers = ["solusdt", "ethusdt", "btcusdt", "dogeusdt", "xrpusdt"];
     let url_base = "wss://stream.binance.us:9443/ws";
     let url_str = tickers.iter().fold(url_base.to_string(), |acc, ticker| {
-        format!("{}/{}@depth@100ms/", acc, ticker)
+        format!("{}/{}@depth@100ms", acc, ticker)
     });
     println!("URL: {}", url_str);
     let request = url_str.into_client_request().unwrap();
