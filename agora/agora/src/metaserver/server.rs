@@ -18,8 +18,8 @@ use tarpc::{
 // Shared server state that will be accessed by all connections
 #[derive(Debug)]
 pub struct ServerState {
-    path_tree: TreeNodeRef,
-    publishers: HashMap<String, PublisherInfo>,
+    pub path_tree: TreeNodeRef,
+    pub publishers: HashMap<String, PublisherInfo>,
     address_manager: PublisherAddressManager,
 }
 
