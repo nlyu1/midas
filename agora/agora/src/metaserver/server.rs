@@ -3,7 +3,7 @@ use super::publisher_info::PublisherInfo;
 use crate::ports::{PUBLISHER_SERVICE_PORT, PUBLISHER_OMNISTRING_PORT, PUBLISHER_PING_PORT};
 use crate::utils::{OrError, PublisherAddressManager, TreeNode, TreeNodeRef, TreeTrait};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use tarpc::context;
@@ -241,7 +241,7 @@ impl ServerState {
 // Asynchronous wrapper around synchronous ServerState implementation that handles networking with defaults.
 #[derive(Clone)]
 pub struct AgoraMetaServer {
-    state: Arc<Mutex<ServerState>>,
+    state: Arc<RwLock<ServerState>>,
 }
 
 impl AgoraMeta for AgoraMetaServer {
@@ -251,28 +251,28 @@ impl AgoraMeta for AgoraMetaServer {
         name: String,
         path: String,
     ) -> OrError<PublisherInfo> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.write().unwrap();
         state.register_publisher(name, path)
     }
 
     async fn remove_publisher(self, _: context::Context, path: String) -> OrError<PublisherInfo> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.write().unwrap();
         state.remove_publisher(path)
     }
 
     async fn path_tree(self, _: context::Context) -> String {
-        let state = self.state.lock().unwrap();
+        let state = self.state.read().unwrap();
         state.get_path_tree_repr()
     }
 
     async fn publisher_info(self, _: context::Context, path: String) -> OrError<PublisherInfo> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.read().unwrap();
         state.get_publisher_info(path)
     }
 }
 
 impl AgoraMetaServer {
-    fn new(shared_state: Arc<Mutex<ServerState>>) -> Self {
+    fn new(shared_state: Arc<RwLock<ServerState>>) -> Self {
         Self {
             state: shared_state,
         }
@@ -282,7 +282,7 @@ impl AgoraMetaServer {
         let server_addr = (IpAddr::V6(address), port);
 
         // Create a single shared server state that all connections will use
-        let shared_state = Arc::new(Mutex::new(ServerState::new()));
+        let shared_state = Arc::new(RwLock::new(ServerState::new()));
 
         // JSON transport is provided by the json_transport tarpc module. It makes it easy
         // to start up a serde-powered json serialization strategy over TCP.
@@ -310,7 +310,6 @@ impl AgoraMetaServer {
                     },
                 )
             })
-            // Max 10 channels.
             .buffer_unordered(32768)
             // for_each runs stream to completion. For this particular case, it will run forever.
             // An example stream which terminates would finite-length stream.
