@@ -6,7 +6,6 @@ use derive_new;
 use futures_util::StreamExt;
 use std::net::IpAddr;
 use std::sync::{Arc, RwLock};
-use std::thread::JoinHandle;
 use tarpc::{
     context,
     server::{self, Channel, incoming::Incoming},
@@ -35,13 +34,12 @@ impl PingRpc for PingRpcServer {
     }
 }
 
-#[derive(derive_new::new)]
 pub struct PingServer {
     payload: Arc<RwLock<Payload>>,
 }
 
 impl PingServer {
-    fn start_server(
+    pub fn new(
         addr: IpAddr,
         port: u16,
         vec_payload: Vec<u8>,

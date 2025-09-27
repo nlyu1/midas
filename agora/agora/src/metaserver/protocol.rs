@@ -1,8 +1,6 @@
 use super::publisher_info::PublisherInfo;
 use crate::utils::OrError;
 
-pub const DEFAULT_PORT: u16 = 8080;
-
 #[tarpc::service]
 pub trait AgoraMeta {
     /// Registers a new publisher at the specified path.

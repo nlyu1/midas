@@ -1,16 +1,18 @@
-use agora::metaserver::{AgoraClient, DEFAULT_PORT};
+use agora::metaserver::AgoraClient;
+use agora::ports::METASERVER_DEFAULT_PORT;
 use agora::utils::TreeTrait;
 use clap::Parser;
 use std::io::{self, Write};
+use std::net::Ipv6Addr;
 
 #[derive(Parser)]
 #[command(version, about = "Interactive MetaClient for Agora MetaServer", long_about = None)]
 struct Args {
-    #[arg(short, long, default_value_t = DEFAULT_PORT)]
+    #[arg(short, long, default_value_t = METASERVER_DEFAULT_PORT)]
     port: u16,
 
-    #[arg(long, default_value = "localhost")]
-    host: String,
+    #[arg(short, long, default_value = "::1")]
+    address: Ipv6Addr,
 }
 
 #[tokio::main]
@@ -18,9 +20,9 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // Try to connect to the server
-    println!("Connecting to MetaServer at {}:{}...", args.host, args.port);
+    println!("Connecting to MetaServer at [{}]:{}...", args.address, args.port);
 
-    let client = match AgoraClient::new(Some(args.port)).await {
+    let client = match AgoraClient::new(args.address, args.port).await {
         Ok(client) => {
             println!("✅ Connected successfully!");
             client

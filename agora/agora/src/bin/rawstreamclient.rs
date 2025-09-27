@@ -1,6 +1,5 @@
+use agora::ports::PUBLISHER_SERVICE_PORT;
 use agora::rawstream::RawStreamClient;
-
-const DEFAULT_PORT: u16 = 8081;
 use clap::Parser;
 use futures_util::StreamExt;
 use std::net::Ipv6Addr;
@@ -8,7 +7,7 @@ use std::net::Ipv6Addr;
 #[derive(Parser)]
 #[command(version, about = "Raw Stream Client - connects to WebSocket server and prints messages", long_about = None)]
 struct Args {
-    #[arg(short, long, default_value_t = DEFAULT_PORT)]
+    #[arg(short, long, default_value_t = PUBLISHER_SERVICE_PORT)]
     port: u16,
 
     #[arg(long, default_value = "::1")]

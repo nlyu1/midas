@@ -1,6 +1,5 @@
+use agora::ports::PUBLISHER_SERVICE_PORT;
 use agora::rawstream::RawStreamServer;
-
-const DEFAULT_PORT: u16 = 8081;
 use clap::Parser;
 use std::io::{self, Write};
 use std::net::Ipv6Addr;
@@ -9,7 +8,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 #[derive(Parser)]
 #[command(version, about = "Raw Stream Server - streams user input to WebSocket clients", long_about = None)]
 struct Args {
-    #[arg(short, long, default_value_t = DEFAULT_PORT)]
+    #[arg(short, long, default_value_t = PUBLISHER_SERVICE_PORT)]
     port: u16,
 
     #[arg(long, default_value = "::1")]

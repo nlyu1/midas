@@ -1,4 +1,4 @@
-use super::protocol::{AgoraMetaClient, DEFAULT_PORT};
+use super::protocol::AgoraMetaClient;
 use super::publisher_info::PublisherInfo;
 use crate::utils::OrError;
 use crate::utils::{TreeNode, TreeNodeRef, TreeTrait};
@@ -11,11 +11,8 @@ pub struct AgoraClient {
 
 // Wrapper around tarpc-generated AgoraMetaClient to have persistent connection.
 impl AgoraClient {
-    pub async fn new(port: Option<u16>) -> anyhow::Result<Self> {
-        let server_addr = (
-            IpAddr::V6(Ipv6Addr::LOCALHOST),
-            port.unwrap_or(DEFAULT_PORT),
-        );
+    pub async fn new(address: Ipv6Addr, port: u16) -> anyhow::Result<Self> {
+        let server_addr = (IpAddr::V6(address), port);
         let mut transport = tarpc::serde_transport::tcp::connect(server_addr, Json::default);
         transport.config_mut().max_frame_length(usize::MAX);
         let client = AgoraMetaClient::new(client::Config::default(), transport.await?).spawn();
@@ -23,17 +20,19 @@ impl AgoraClient {
     }
 
     pub async fn register_publisher(&self, name: String, path: String) -> OrError<PublisherInfo> {
-        self.client
+        let result = self.client
             .register_publisher(context::current(), name, path)
             .await
-            .map_err(|e| format!("RPC error: {}", e))?
+            .map_err(|e| format!("RPC error: {}", e))?;
+        result
     }
 
     pub async fn remove_publisher(&self, path: String) -> OrError<PublisherInfo> {
-        self.client
+        let result = self.client
             .remove_publisher(context::current(), path)
             .await
-            .map_err(|e| format!("RPC error: {}", e))?
+            .map_err(|e| format!("RPC error: {}", e))?;
+        result
     }
 
     pub async fn get_path_tree(&self) -> OrError<TreeNodeRef> {
@@ -49,9 +48,10 @@ impl AgoraClient {
     }
 
     pub async fn get_publisher_info(&self, path: String) -> OrError<PublisherInfo> {
-        self.client
+        let result = self.client
             .publisher_info(context::current(), path)
             .await
-            .map_err(|e| format!("RPC error: {}", e))?
+            .map_err(|e| format!("RPC error: {}", e))?;
+        result
     }
 }

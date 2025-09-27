@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::net::Ipv6Addr;
 
 /// Simple address manager for localhost development
-/// Allocates unique IPv6 link-local addresses (fe80::/10) for each publisher
+/// Allocates unique IPv6 localhost addresses (::1, ::2, ::3, etc.) for each publisher
 #[derive(Debug)]
 pub struct PublisherAddressManager {
     next_index: u32,
@@ -30,16 +30,18 @@ impl PublisherAddressManager {
             ));
         }
 
-        // Always generate link-local addresses: fe80::1000:index
-        let proposed_addr = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0x1000, self.next_index as u16);
+        // Generate ULA addresses: fde5:402f:ab0a:1::1, fde5:402f:ab0a:1::2, etc.
+        // With ip_nonlocal_bind=1, any address in the subnet can be bound
+        let proposed_addr = Ipv6Addr::new(0xfde5, 0x402f, 0xab0a, 0x0001, 0, 0, 0, self.next_index as u16);
 
         self.next_index += 1;
         Ok(proposed_addr)
     }
 
     pub fn verify_address(addr: Ipv6Addr) -> bool {
-        // Verify it's in the link-local range (fe80::/10)
-        matches!(addr.segments()[0], 0xfe80..=0xfebf)
+        // Verify it's in our ULA range fde5:402f:ab0a:1::/64
+        let segments = addr.segments();
+        segments[0] == 0xfde5 && segments[1] == 0x402f && segments[2] == 0xab0a && segments[3] == 0x0001
     }
 
     /// Enhanced verification that actually tests if we can bind to the address

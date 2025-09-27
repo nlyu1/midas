@@ -8,7 +8,7 @@ name = "tarpc_example"
 path = "src/lib.rs"
 
 [[bin]]
-name = "main"
+name = "tarpc_main"
 path = "src/main.rs"
 
 [dependencies]

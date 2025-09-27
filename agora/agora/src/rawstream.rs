@@ -190,7 +190,7 @@ where
         Ok(Self { sender: tx })
     }
 
-    pub fn publish(&self, value: T) -> Result<(), String> {
+    pub fn publish(&self, value: T) -> OrError<()> {
         self.sender
             .send(value)
             .map_err(|_| "Channel closed".to_string())
