@@ -1,6 +1,6 @@
 use super::protocol::AgoraMeta;
 use super::publisher_info::PublisherInfo;
-use crate::ports::{PUBLISHER_SERVICE_PORT, PUBLISHER_OMNISTRING_PORT, PUBLISHER_PING_PORT};
+use crate::constants::{PUBLISHER_SERVICE_PORT, PUBLISHER_OMNISTRING_PORT, PUBLISHER_PING_PORT};
 use crate::utils::{OrError, PublisherAddressManager, TreeNode, TreeNodeRef, TreeTrait};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -128,17 +128,9 @@ impl ServerState {
         // so we don't need to check for child publishers anymore
         match self.publishers.remove(&path) {
             Some(publisher_info) => {
-                // Try to remove the path from the tree if it exists
-                if let Ok(_) = self.path_tree.get_child(&path) {
-                    if let Err(e) = self.path_tree.remove_child_and_branch(&path) {
-                        // Don't fail the operation if tree removal fails
-                        eprintln!("TreeNode operation failed: {}", e);
-                    }
-                }
-                match self.confirmed_publishers.remove(&path) {
-                    Some(_) => println!("Removed confirmed publisher {:?} from path {}", publisher_info, &path),
-                    None => println!("Removed publisher {:?} from path {}", publisher_info, &path),
-                } 
+                self.path_tree.remove_child_and_branch(&path)?;
+                self.confirmed_publishers.remove(&path).ok_or("Removed publisher is registered but not confirmed")?;
+                self.address_manager.free_address(publisher_info.service_socket.ip().clone())?; 
                 Ok(publisher_info)
             }
             None => Err(format!(

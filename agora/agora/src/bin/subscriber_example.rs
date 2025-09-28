@@ -1,5 +1,5 @@
 use agora::{Agorable, Subscriber};
-use agora::ports::METASERVER_DEFAULT_PORT;
+use agora::constants::METASERVER_DEFAULT_PORT;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;

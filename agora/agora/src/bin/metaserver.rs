@@ -1,5 +1,5 @@
 use agora::metaserver::AgoraMetaServer;
-use agora::ports::METASERVER_DEFAULT_PORT;
+use agora::constants::METASERVER_DEFAULT_PORT;
 use clap::Parser;
 use std::net::Ipv6Addr;
 

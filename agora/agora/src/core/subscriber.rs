@@ -41,7 +41,7 @@ impl<T: Agorable> Subscriber<T> {
         )
     }
 
-    pub async fn get(self) -> OrError<T> {
+    pub async fn get(&mut self) -> OrError<T> {
         let (current_bytes, _, _td) = self.pingclient.ping().await?;
         let current_value: T = postcard::from_bytes(&current_bytes)
             .map_err(|e| format!("Failed to deserialize current value: {}", e))?;
@@ -79,7 +79,7 @@ pub struct OmniSubscriber {
 }
 
 impl OmniSubscriber {
-    // Same interfaces as above, except that we fix to T=String and use the String rawstream service on ports (string_socket)
+    // Same interfaces as above, except that we fix to T=String and use the String rawstream service on constants (string_socket)
     pub async fn new(path: String, metaserver_addr: Ipv6Addr, metaserver_port: u16) -> OrError<OmniSubscriber> {
         let _metaclient = AgoraClient::new(metaserver_addr, metaserver_port).await
             .map_err(|e| format!("Failed to create AgoraClient: {}", e))?; 
@@ -104,13 +104,13 @@ impl OmniSubscriber {
         })
     }
 
-    pub async fn get(self) -> OrError<String> {
+    pub async fn get(&mut self) -> OrError<String> {
         let (_current_bytes, current_string, _td) = self.pingclient.ping().await?;
         Ok(current_string)
     }
 
     // Returns current String value and a stream of String updates
-    pub async fn get_stream(self) -> OrError<(String, Pin<Box<dyn Stream<Item = OrError<String>> + Send>>)> {
+    pub async fn get_stream(&mut self) -> OrError<(String, Pin<Box<dyn Stream<Item = OrError<String>> + Send>>)> {
         // Get current value from ping (second field is String)
         let (_current_bytes, current_string, _td) = self.pingclient.ping().await?;
         

@@ -1,47 +1,66 @@
+use crate::constants::{
+    ULA_PREFIX_SEGMENT_0, ULA_PREFIX_SEGMENT_1, ULA_PREFIX_SEGMENT_2, ULA_PREFIX_SEGMENT_3,
+};
 use crate::utils::OrError;
 use std::collections::HashSet;
 use std::net::Ipv6Addr;
 
 /// Simple address manager for localhost development
-/// Allocates unique IPv6 localhost addresses (::1, ::2, ::3, etc.) for each publisher
+/// Allocates unique IPv6 ULA addresses in the full suffix range for each publisher
 #[derive(Debug)]
 pub struct PublisherAddressManager {
-    next_index: u32,
-    max_addresses: u32,
-    allocated_addresses: HashSet<Ipv6Addr>,
+    allocated_addresses: HashSet<u64>,
 }
 
 impl PublisherAddressManager {
     /// Create a new address manager for localhost development
     pub fn new() -> Self {
         Self {
-            next_index: 1,
-            max_addresses: u16::MAX as u32, // 65535 publishers should be enough for localhost!
             allocated_addresses: HashSet::new(),
         }
     }
 
-    fn propose_new_address(&mut self) -> OrError<Ipv6Addr> {
-        if self.next_index > self.max_addresses {
-            return Err(format!(
-                "Exhausted address space! Used {}/{} addresses",
-                self.allocated_addresses.len(),
-                self.max_addresses
-            ));
-        }
-
-        // Generate ULA addresses: fde5:402f:ab0a:1::1, fde5:402f:ab0a:1::2, etc.
+    fn suffix_to_address(suffix: u64) -> Ipv6Addr {
+        // Generate ULA addresses: fde5:402f:ab0a:1::<64-bit suffix>
         // With ip_nonlocal_bind=1, any address in the subnet can be bound
-        let proposed_addr = Ipv6Addr::new(0xfde5, 0x402f, 0xab0a, 0x0001, 0, 0, 0, self.next_index as u16);
+        let high = (suffix >> 48) as u16;
+        let mid_high = (suffix >> 32) as u16;
+        let mid_low = (suffix >> 16) as u16;
+        let low = suffix as u16;
 
-        self.next_index += 1;
-        Ok(proposed_addr)
+        Ipv6Addr::new(
+            ULA_PREFIX_SEGMENT_0,
+            ULA_PREFIX_SEGMENT_1,
+            ULA_PREFIX_SEGMENT_2,
+            ULA_PREFIX_SEGMENT_3,
+            high,
+            mid_high,
+            mid_low,
+            low,
+        )
+    }
+
+    fn address_to_suffix(addr: Ipv6Addr) -> Option<u64> {
+        let segments = addr.segments();
+        if segments[0] == ULA_PREFIX_SEGMENT_0
+            && segments[1] == ULA_PREFIX_SEGMENT_1
+            && segments[2] == ULA_PREFIX_SEGMENT_2
+            && segments[3] == ULA_PREFIX_SEGMENT_3
+        {
+            Some(
+                ((segments[4] as u64) << 48)
+                    | ((segments[5] as u64) << 32)
+                    | ((segments[6] as u64) << 16)
+                    | (segments[7] as u64),
+            )
+        } else {
+            None
+        }
     }
 
     pub fn verify_address(addr: Ipv6Addr) -> bool {
         // Verify it's in our ULA range fde5:402f:ab0a:1::/64
-        let segments = addr.segments();
-        segments[0] == 0xfde5 && segments[1] == 0x402f && segments[2] == 0xab0a && segments[3] == 0x0001
+        Self::address_to_suffix(addr).is_some()
     }
 
     /// Enhanced verification that actually tests if we can bind to the address
@@ -54,26 +73,27 @@ impl PublisherAddressManager {
     }
 
     fn new_address(&mut self) -> OrError<Ipv6Addr> {
-        // Try up to 10 times to find a valid, unused address
-        for _attempt in 1..=10 {
-            let proposed = self.propose_new_address()?;
+        use rand::Rng;
+        let mut rng = rand::rng();
 
-            // Skip if we've already allocated this address
-            if self.allocated_addresses.contains(&proposed) {
+        // Try up to 1000 times to find an unused address
+        for _attempt in 1..=1000 {
+            let suffix: u64 = rng.random();
+
+            // Skip if we've already allocated this suffix
+            if self.allocated_addresses.contains(&suffix) {
                 continue;
             }
 
-            // Basic verification
-            if !Self::verify_address(proposed) {
-                return Err(format!("Proposed address {} failed verification", proposed));
-            }
+            // Generate the address
+            let proposed = Self::suffix_to_address(suffix);
 
             // Track the allocation
-            self.allocated_addresses.insert(proposed);
+            self.allocated_addresses.insert(suffix);
             return Ok(proposed);
         }
 
-        Err("Failed to allocate address after 10 attempts".to_string())
+        Err("Failed to allocate address after 1000 attempts".to_string())
     }
 
     /// Public interface - allocate a new address for a publisher
@@ -81,18 +101,24 @@ impl PublisherAddressManager {
         self.new_address()
     }
 
+    /// Free an address back to the pool, allowing it to be reused
+    pub fn free_address(&mut self, addr: Ipv6Addr) -> OrError<()> {
+        if let Some(suffix) = Self::address_to_suffix(addr) {
+            if self.allocated_addresses.remove(&suffix) {
+                Ok(())
+            } else {
+                Err(format!("Address {} was not allocated by this manager", addr))
+            }
+        } else {
+            Err(format!("Address {} is not in the managed ULA range", addr))
+        }
+    }
+
     /// Get info about current allocations
     pub fn allocation_info(&self) -> String {
         format!(
-            "AddressManager: {}/{} addresses allocated, next_index: {}",
-            self.allocated_addresses.len(),
-            self.max_addresses,
-            self.next_index
+            "AddressManager: {} addresses allocated from full 64-bit suffix space",
+            self.allocated_addresses.len()
         )
-    }
-
-    /// Release an address back to the pool (for cleanup)
-    pub fn release_address(&mut self, addr: Ipv6Addr) -> bool {
-        self.allocated_addresses.remove(&addr)
     }
 }

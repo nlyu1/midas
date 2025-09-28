@@ -1,4 +1,4 @@
-use crate::ports::{PUBLISHER_SERVICE_PORT, PUBLISHER_OMNISTRING_PORT, PUBLISHER_PING_PORT};
+use crate::constants::{PUBLISHER_SERVICE_PORT, PUBLISHER_OMNISTRING_PORT, PUBLISHER_PING_PORT};
 use crate::utils::{OrError, PublisherAddressManager};
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 

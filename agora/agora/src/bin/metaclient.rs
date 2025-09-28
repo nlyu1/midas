@@ -1,5 +1,5 @@
 use agora::metaserver::AgoraClient;
-use agora::ports::METASERVER_DEFAULT_PORT;
+use agora::constants::METASERVER_DEFAULT_PORT;
 use agora::utils::TreeTrait;
 use clap::Parser;
 use std::io::{self, Write};
