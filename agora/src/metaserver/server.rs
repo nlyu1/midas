@@ -33,12 +33,12 @@ pub struct ServerState {
 // After confirmation, server runs a ping-client. There's also a 
 
 impl ServerState {
-    pub fn new() -> Self {
+    pub fn new(uid: u16) -> Self {
         Self {
             path_tree: TreeNode::new("agora"),
             publishers: HashMap::new(),
-            confirmed_publishers: HashMap::new(), 
-            address_manager: PublisherAddressManager::new(),
+            confirmed_publishers: HashMap::new(),
+            address_manager: PublisherAddressManager::new(uid),
         }
     }
 
@@ -354,7 +354,7 @@ impl AgoraMetaServer {
         let server_addr = (IpAddr::V6(address), port);
 
         // Create a single shared server state that all connections will use
-        let shared_state = Arc::new(RwLock::new(ServerState::new()));
+        let shared_state = Arc::new(RwLock::new(ServerState::new(port)));
 
         // JSON transport is provided by the json_transport tarpc module. It makes it easy
         // to start up a serde-powered json serialization strategy over TCP.

@@ -2,7 +2,7 @@ use agora::metaserver::ServerState;
 use agora::utils::TreeTrait;
 
 fn create_test_instance() -> ServerState {
-    let state = ServerState::new();
+    let state = ServerState::new(8080); // Use test UID of 8080
 
     // Create a basic tree structure for testing
     state.path_tree().add_children(&["api", "static", "admin"]);
