@@ -1,5 +1,5 @@
-use crate::utils::parse_ipv6_str;
 use crate::Relay;
+use crate::utils::parse_ipv6_str;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use tokio::runtime::Runtime;
@@ -54,7 +54,10 @@ macro_rules! create_typed_relay {
 
                 Ok(self
                     .rt
-                    .block_on(self.inner.swapon(src_path, metaserver_addr, metaserver_port))
+                    .block_on(
+                        self.inner
+                            .swapon(src_path, metaserver_addr, metaserver_port),
+                    )
                     .map_err(|e| PyRuntimeError::new_err(e))?)
             }
         }

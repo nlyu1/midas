@@ -20,7 +20,8 @@ impl AgoraClient {
     }
 
     pub async fn register_publisher(&self, name: String, path: String) -> OrError<PublisherInfo> {
-        let result = self.client
+        let result = self
+            .client
             .register_publisher(context::current(), name, path)
             .await
             .map_err(|e| format!("RPC error: {}", e))?;
@@ -28,7 +29,8 @@ impl AgoraClient {
     }
 
     pub async fn confirm_publisher(&self, path: String) -> OrError<()> {
-        let result = self.client
+        let result = self
+            .client
             .confirm_publisher(context::current(), path)
             .await
             .map_err(|e| format!("RPC error: {}", e))?;
@@ -36,7 +38,8 @@ impl AgoraClient {
     }
 
     pub async fn remove_publisher(&self, path: String) -> OrError<PublisherInfo> {
-        let result = self.client
+        let result = self
+            .client
             .remove_publisher(context::current(), path)
             .await
             .map_err(|e| format!("RPC error: {}", e))?;
@@ -56,7 +59,8 @@ impl AgoraClient {
     }
 
     pub async fn get_publisher_info(&self, path: String) -> OrError<PublisherInfo> {
-        let result = self.client
+        let result = self
+            .client
             .publisher_info(context::current(), path)
             .await
             .map_err(|e| format!("RPC error: {}", e))?;

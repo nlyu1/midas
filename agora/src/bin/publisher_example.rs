@@ -1,6 +1,7 @@
-use agora::{Agorable, Publisher};
 use agora::constants::METASERVER_DEFAULT_PORT;
+use agora::{Agorable, Publisher};
 use clap::Parser;
+use indoc::indoc;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::io::{self, Write};
@@ -33,10 +34,14 @@ impl Agorable for Message {}
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    println!("🚀 Agora Publisher Example");
-    println!("This example demonstrates publishing messages to an Agora path.");
-    println!("Make sure the metaserver is running on port {}!", cli.port);
-    println!();
+    print!(
+        "{}",
+        indoc! {"
+            🚀 Agora Publisher Example
+            This example demonstrates publishing messages to an Agora path.
+        "}
+    );
+    println!("Make sure the metaserver is running on port {}!\n", cli.port);
 
     // Get publisher configuration from user
     print!("Enter publisher name: ");
@@ -77,9 +82,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await
     .map_err(|e| format!("Failed to create publisher: {}", e))?;
 
-    println!("✅ Publisher '{}' created successfully for path '{}'", name, path);
-    println!("💬 Enter messages to publish (Ctrl+C to exit):");
-    println!();
+    println!(
+        "✅ Publisher '{}' created successfully for path '{}'",
+        name, path
+    );
+    print!(
+        "{}",
+        indoc! {"
+            💬 Enter messages to publish (Ctrl+C to exit):
+        "}
+    );
 
     // Main publishing loop
     loop {

@@ -6,11 +6,7 @@ fn test_basic_address_allocation() {
     let mut manager = PublisherAddressManager::new(1234); // Test UID
 
     // Should start with no allocations
-    assert!(
-        manager
-            .allocation_info()
-            .contains("0 addresses allocated")
-    );
+    assert!(manager.allocation_info().contains("0 addresses allocated"));
 
     // Allocate first address
     let addr1 = manager.allocate_publisher_address().unwrap();
@@ -32,9 +28,7 @@ fn test_address_verification() {
     let manager = PublisherAddressManager::new(0); // UID 0 for this test
 
     // ULA addresses in our range should be valid (with UID 0 as fifth segment)
-    assert!(manager.verify_address(Ipv6Addr::new(
-        0xfde5, 0x402f, 0xab0a, 0x0001, 0, 0, 0, 1
-    )));
+    assert!(manager.verify_address(Ipv6Addr::new(0xfde5, 0x402f, 0xab0a, 0x0001, 0, 0, 0, 1)));
 
     // Other ranges should fail
     assert!(!manager.verify_address(
@@ -58,19 +52,11 @@ fn test_address_release() {
     let mut manager = PublisherAddressManager::new(5678); // Test UID
 
     let addr = manager.allocate_publisher_address().unwrap();
-    assert!(
-        manager
-            .allocation_info()
-            .contains("1 addresses allocated")
-    );
+    assert!(manager.allocation_info().contains("1 addresses allocated"));
 
     // Release the address
     assert!(manager.free_address(addr).is_ok());
-    assert!(
-        manager
-            .allocation_info()
-            .contains("0 addresses allocated")
-    );
+    assert!(manager.allocation_info().contains("0 addresses allocated"));
 
     // Can't release the same address twice
     assert!(manager.free_address(addr).is_err());
@@ -173,7 +159,7 @@ fn test_address_pattern() {
 
         // Verify it's a valid ULA address in our range
         assert!(manager.verify_address(addr));
-        assert!(addr.to_string().starts_with("fde5:402f:ab0a:1:457:"));  // UID 1111 = 0x457
+        assert!(addr.to_string().starts_with("fde5:402f:ab0a:1:457:")); // UID 1111 = 0x457
     }
 
     println!("✅ Address pattern is correct: fde5:402f:ab0a:1:*");

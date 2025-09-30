@@ -15,7 +15,13 @@ pub struct Publisher<T: Agorable> {
 }
 
 impl<T: Agorable> Publisher<T> {
-    pub async fn new(name: String, path: String, initial_value: T, metaserver_addr: Ipv6Addr, metaserver_port: u16) -> OrError<Self> {
+    pub async fn new(
+        name: String,
+        path: String,
+        initial_value: T,
+        metaserver_addr: Ipv6Addr,
+        metaserver_port: u16,
+    ) -> OrError<Self> {
         let metaclient = AgoraClient::new(metaserver_addr, metaserver_port).await
             .map_err(|e| format!(
                 "AgoraPublisher Error: failed to create _metaclient, make sure to spin up metaserver first: {}", e))?;
@@ -28,28 +34,45 @@ impl<T: Agorable> Publisher<T> {
             publisher_info.ping_socket.ip().clone().into(),
             publisher_info.ping_socket.port(),
             vec_payload,
-            str_payload
-        ).map_err(|e| format!("Failed to create ping server: {}", e))?;
+            str_payload,
+        )
+        .map_err(|e| format!("Failed to create ping server: {}", e))?;
         let rawstream_byteserver = RawStreamServer::new(
             publisher_info.service_socket.ip().clone(),
             publisher_info.service_socket.port(),
-            None
-        ).await.map_err(|e| format!("AgoraPublisher Error: failed to create byte rawstream server: {}", e))?;
+            None,
+        )
+        .await
+        .map_err(|e| {
+            format!(
+                "AgoraPublisher Error: failed to create byte rawstream server: {}",
+                e
+            )
+        })?;
         let rawstream_omniserver = RawStreamServer::new(
             publisher_info.string_socket.ip().clone(),
             publisher_info.string_socket.port(),
-            None
-        ).await.map_err(|e| format!("AgoraPublisher Error: failed to create string rawstream server: {}", e))?;
+            None,
+        )
+        .await
+        .map_err(|e| {
+            format!(
+                "AgoraPublisher Error: failed to create string rawstream server: {}",
+                e
+            )
+        })?;
 
         // Next, establish handshake with server by asking server to confirm
-        metaclient.confirm_publisher(path).await
+        metaclient
+            .confirm_publisher(path)
+            .await
             .map_err(|e| format!("Failed to confirm publisher: {}", e))?;
         Ok(Self {
-            _metaclient : metaclient,
+            _metaclient: metaclient,
             rawstream_byteserver,
             rawstream_omniserver,
             pingserver,
-            _phantom: PhantomData
+            _phantom: PhantomData,
         })
     }
 
@@ -64,7 +87,8 @@ impl<T: Agorable> Publisher<T> {
         // Compute vec and string payloads
         let (vec_payload, str_payload) = Self::value_to_payloads(&value)?;
         // Update last value on ping server
-        self.pingserver.update_payload(vec_payload.clone(), str_payload.clone());
+        self.pingserver
+            .update_payload(vec_payload.clone(), str_payload.clone());
         // Publish to both rawstream servers
         self.rawstream_byteserver.publish(vec_payload)?;
         self.rawstream_omniserver.publish(str_payload)?;

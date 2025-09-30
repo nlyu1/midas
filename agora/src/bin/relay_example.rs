@@ -1,6 +1,7 @@
 use agora::Relay;
 use agora::constants::METASERVER_DEFAULT_PORT;
 use clap::Parser;
+use indoc::indoc;
 use std::io::{self, Write};
 use std::net::Ipv6Addr;
 use tokio;
@@ -25,10 +26,14 @@ fn read_input(prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    println!("🔄 Agora Relay Example");
-    println!("This example demonstrates relaying messages between Agora paths.");
-    println!("Make sure the metaserver is running on port {}!", cli.port);
-    println!();
+    print!(
+        "{}",
+        indoc! {"
+            🔄 Agora Relay Example
+            This example demonstrates relaying messages between Agora paths.
+        "}
+    );
+    println!("Make sure the metaserver is running on port {}!\n", cli.port);
 
     // Setup relay configuration
     println!("📡 Setting up relay destination:");
@@ -63,9 +68,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("✅ Relay created successfully!");
     println!("📍 Destination: '{}'", dest_path);
-    println!();
-    println!("🔄 Ready for swap operations. Enter source configurations:");
-    println!("💡 Press Ctrl+C to exit");
+    print!(
+        "{}",
+        indoc! {"
+
+            🔄 Ready for swap operations. Enter source configurations:
+            💡 Press Ctrl+C to exit
+        "}
+    );
     println!("{}", "─".repeat(50));
 
     // Main swap loop

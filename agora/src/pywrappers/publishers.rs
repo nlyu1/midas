@@ -1,5 +1,5 @@
-use crate::utils::parse_ipv6_str;
 use crate::Publisher;
+use crate::utils::parse_ipv6_str;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use tokio::runtime::Runtime;

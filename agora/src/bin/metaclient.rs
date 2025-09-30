@@ -1,11 +1,12 @@
-use agora::metaserver::AgoraClient;
-use agora::constants::METASERVER_DEFAULT_PORT;
-use agora::utils::TreeTrait;
 use agora::OmniSubscriber;
+use agora::constants::METASERVER_DEFAULT_PORT;
+use agora::metaserver::AgoraClient;
+use agora::utils::TreeTrait;
 use clap::Parser;
+use futures_util::StreamExt;
+use indoc::indoc;
 use std::io::{self, Write};
 use std::net::Ipv6Addr;
-use futures_util::StreamExt;
 use tokio::io::{AsyncReadExt, stdin};
 use tokio::select;
 
@@ -24,7 +25,10 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // Try to connect to the server
-    println!("Connecting to MetaServer at [{}]:{}...", args.address, args.port);
+    println!(
+        "Connecting to MetaServer at [{}]:{}...",
+        args.address, args.port
+    );
 
     let client = match AgoraClient::new(args.address, args.port).await {
         Ok(client) => {
@@ -43,15 +47,21 @@ async fn main() -> anyhow::Result<()> {
 
     // Enter interactive loop
     println!("\nWelcome to the Agora MetaClient!");
-    println!("This tool is used for exploring the current running metaserver and monitoring processes.");
-    println!("Available commands:");
-    println!("  remove <path>      - Remove publisher at path");
-    println!("  info <path>        - Get publisher info at path");
-    println!("  monitor <path>     - Monitor string outputs from publisher at path (Ctrl+D to exit)");
-    println!("  print              - Print current path tree");
-    println!("  help               - Show this help message");
-    println!("  quit/exit          - Exit the client");
-    println!();
+    println!(
+        "This tool is used for exploring the current running metaserver and monitoring processes."
+    );
+    print!(
+        "{}",
+        indoc! {"
+            Available commands:
+              remove <path>      - Remove publisher at path
+              info <path>        - Get publisher info at path
+              monitor <path>     - Monitor string outputs from publisher at path (Ctrl+D to exit)
+              print              - Print current path tree
+              help               - Show this help message
+              quit/exit          - Exit the client
+        "}
+    );
 
     loop {
         print!("metaclient> ");
@@ -118,13 +128,18 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn show_help() {
-    println!("Available commands:");
-    println!("  remove <path>      - Remove publisher at path");
-    println!("  info <path>        - Get publisher info at path");
-    println!("  monitor <path>     - Monitor string outputs from publisher at path (Ctrl+D to exit)");
-    println!("  print              - Print current path tree");
-    println!("  help               - Show this help message");
-    println!("  quit/exit          - Exit the client");
+    print!(
+        "{}",
+        indoc! {"
+            Available commands:
+              remove <path>      - Remove publisher at path
+              info <path>        - Get publisher info at path
+              monitor <path>     - Monitor string outputs from publisher at path (Ctrl+D to exit)
+              print              - Print current path tree
+              help               - Show this help message
+              quit/exit          - Exit the client
+        "}
+    );
 }
 
 async fn print_path_tree(client: &AgoraClient) {
@@ -139,7 +154,6 @@ async fn print_path_tree(client: &AgoraClient) {
         }
     }
 }
-
 
 async fn remove_publisher(client: &AgoraClient, path: &str) {
     match client.remove_publisher(path.to_string()).await {
@@ -167,20 +181,23 @@ async fn get_publisher_info(client: &AgoraClient, path: &str) {
 }
 
 async fn monitor_path(path: &str, metaserver_addr: Ipv6Addr, metaserver_port: u16) {
-    println!("🔍 Starting to monitor path '{}' - Press Ctrl+D to exit", path);
+    println!(
+        "🔍 Starting to monitor path '{}' - Press Ctrl+D to exit",
+        path
+    );
 
     // Create omnisubscriber
-    let mut omni_subscriber = match OmniSubscriber::new(
-        path.to_string(),
-        metaserver_addr,
-        metaserver_port
-    ).await {
-        Ok(subscriber) => subscriber,
-        Err(e) => {
-            println!("❌ Failed to create omnisubscriber for path '{}': {}", path, e);
-            return;
-        }
-    };
+    let mut omni_subscriber =
+        match OmniSubscriber::new(path.to_string(), metaserver_addr, metaserver_port).await {
+            Ok(subscriber) => subscriber,
+            Err(e) => {
+                println!(
+                    "❌ Failed to create omnisubscriber for path '{}': {}",
+                    path, e
+                );
+                return;
+            }
+        };
 
     // Get initial value and stream
     let (_current_value, mut stream) = match omni_subscriber.get_stream().await {

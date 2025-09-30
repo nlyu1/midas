@@ -1,6 +1,7 @@
-use agora::{Agorable, Subscriber};
 use agora::constants::METASERVER_DEFAULT_PORT;
+use agora::{Agorable, Subscriber};
 use futures_util::StreamExt;
+use indoc::indoc;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::io::{self, Write};
@@ -23,10 +24,17 @@ impl Agorable for Message {}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("📻 Agora Subscriber Example");
-    println!("This example demonstrates subscribing to messages from an Agora path.");
-    println!("Make sure the metaserver is running on port {}!", METASERVER_DEFAULT_PORT);
-    println!();
+    print!(
+        "{}",
+        indoc! {"
+            📻 Agora Subscriber Example
+            This example demonstrates subscribing to messages from an Agora path.
+        "}
+    );
+    println!(
+        "Make sure the metaserver is running on port {}!\n",
+        METASERVER_DEFAULT_PORT
+    );
 
     // Get subscriber configuration from user
     print!("Enter path to subscribe to (e.g., chat/general): ");
@@ -38,24 +46,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔌 Connecting to metaserver and creating subscriber...");
 
     // Create subscriber
-    let mut subscriber = Subscriber::<Message>::new(
-        path.clone(),
-        Ipv6Addr::LOCALHOST,
-        METASERVER_DEFAULT_PORT,
-    )
-    .await
-    .map_err(|e| format!("Failed to create subscriber: {}", e))?;
+    let mut subscriber =
+        Subscriber::<Message>::new(path.clone(), Ipv6Addr::LOCALHOST, METASERVER_DEFAULT_PORT)
+            .await
+            .map_err(|e| format!("Failed to create subscriber: {}", e))?;
 
     println!("✅ Subscriber created successfully for path '{}'", path);
-    println!("📡 Getting current value and starting stream...");
-    println!();
+    print!(
+        "{}",
+        indoc! {"
+            📡 Getting current value and starting stream...
+        "}
+    );
 
     // Get current value and start streaming
-    let (current_value, mut stream) = subscriber.get_stream().await
+    let (current_value, mut stream) = subscriber
+        .get_stream()
+        .await
         .map_err(|e| format!("Failed to get stream: {}", e))?;
 
     println!("📥 Current value: {}", current_value);
-    println!("🎧 Listening for new messages (Ctrl+C to exit):");
+    print!(
+        "{}",
+        indoc! {"
+            🎧 Listening for new messages (Ctrl+C to exit):
+        "}
+    );
     println!("{}", "─".repeat(50));
 
     // Listen for new messages

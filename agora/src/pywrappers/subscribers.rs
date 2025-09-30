@@ -68,7 +68,6 @@ create_typed_subscriber!(PyBoolSubscriber, PyBoolIterator, bool);
 create_typed_subscriber!(PyF64Subscriber, PyF64Iterator, f64);
 create_typed_subscriber!(PyF32Subscriber, PyF32Iterator, f32);
 
-
 #[pyclass]
 pub struct PyOmniSubscriber {
     inner: OmniSubscriber,

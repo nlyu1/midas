@@ -1,6 +1,7 @@
 use agora::constants::PUBLISHER_SERVICE_PORT;
 use agora::rawstream::RawStreamServer;
 use clap::Parser;
+use indoc::indoc;
 use std::io::{self, Write};
 use std::net::Ipv6Addr;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -20,16 +21,35 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // Parse the IPv6 address
-    let address: Ipv6Addr = args.host.parse()
+    let address: Ipv6Addr = args
+        .host
+        .parse()
         .map_err(|_| anyhow::anyhow!("Invalid IPv6 address: {}", args.host))?;
 
-    println!("🚀 Starting Raw Stream Server on [{}]:{}", address, args.port);
-    println!("📝 Type messages and press Enter to broadcast them to connected clients");
-    println!("🔌 Clients can connect via WebSocket to ws://[{}]:{}", address, args.port);
-    println!("💡 Type 'quit' or 'exit' to stop the server\n");
+    println!(
+        "🚀 Starting Raw Stream Server on [{}]:{}",
+        address, args.port
+    );
+    print!(
+        "{}",
+        indoc! {"
+            📝 Type messages and press Enter to broadcast them to connected clients
+        "}
+    );
+    println!(
+        "🔌 Clients can connect via WebSocket to ws://[{}]:{}",
+        address, args.port
+    );
+    print!(
+        "{}",
+        indoc! {"
+            💡 Type 'quit' or 'exit' to stop the server
+        "}
+    );
 
     // Create and start the server (this initializes everything)
-    let server: RawStreamServer<String> = RawStreamServer::new(address, args.port, None).await
+    let server: RawStreamServer<String> = RawStreamServer::new(address, args.port, None)
+        .await
         .map_err(|e| anyhow::anyhow!(e))?;
 
     println!("✅ Server started successfully!");
@@ -54,7 +74,8 @@ async fn main() -> anyhow::Result<()> {
                     break;
                 } else {
                     let now = chrono::Utc::now();
-                    let timestamp = format!("{}:{:06.3}",
+                    let timestamp = format!(
+                        "{}:{:06.3}",
                         now.format("%M:%S"),
                         now.timestamp_subsec_micros() as f64 / 1000.0
                     );

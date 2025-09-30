@@ -55,7 +55,8 @@ impl ServerState {
         if self.publishers.contains_key(&path) {
             let publisher_info = self.publishers.get(&path).unwrap();
             return Err(format!(
-                "Publisher {:?} already registered at {}. Check path or use `update` instead.",
+                "Publisher {:?} already registered at {}. \
+                 Check path or use `update` instead.",
                 publisher_info, path
             ));
         }
@@ -67,7 +68,8 @@ impl ServerState {
         // Publishers can only be registered at new paths, not existing directory nodes
         if self.path_tree.get_child(&path).is_ok() {
             return Err(format!(
-                "Path '{}' already exists as a directory in the tree. Publishers can only be registered at new paths.",
+                "Path '{}' already exists as a directory in the tree. \
+                 Publishers can only be registered at new paths.",
                 path
             ));
         }
@@ -94,7 +96,8 @@ impl ServerState {
         // Checks that publisher has already been registered
         if !self.publishers.contains_key(&path) {
             return Err(format!(
-                "Metaserver confirmation error: please register path {} before confirming",
+                "Metaserver confirmation error: \
+                 please register path {} before confirming",
                 path
             ));
         }
@@ -102,7 +105,8 @@ impl ServerState {
         // Checks against duplicate confirmation
         if self.confirmed_publishers.contains_key(&path) {
             return Err(format!(
-                "Metaserver confirmation error: {} already registered and confirmed",
+                "Metaserver confirmation error: \
+                 {} already registered and confirmed",
                 path
             ));
         }
@@ -126,7 +130,11 @@ impl ServerState {
                     "Removed registered publisher {} upon unsuccessful confirmation",
                     &path
                 );
-                format!("Failed to create ping client! {}", e)
+                format!(
+                    "Publisher confirmation failed: metaserver failed to create ping client! \
+                     You might have forgotten to run network setup: {}",
+                    e
+                )
             })?;
         let _ = pingclient.ping().await.map_err(|e| {
             let _ = self.remove_publisher(path.clone());
@@ -159,7 +167,8 @@ impl ServerState {
                 Ok(publisher_info)
             }
             None => Err(format!(
-                "Can only remove paths associated with publishers: path '{}' is not associated with any publishers.",
+                "Can only remove paths associated with publishers: \
+                 path '{}' is not associated with any publishers.",
                 path
             )),
         }
@@ -181,7 +190,9 @@ impl ServerState {
                 pingclient
                     .ping()
                     .await
-                    .map_err(|_| format!("Cannot ping {}. Publisher might be stale", path))?;
+                    .map_err(|_| {
+                        format!("Cannot ping {}. Publisher might be stale", path)
+                    })?;
                 Ok(publisher.clone())
             }
             (Some(_), None) => Err(format!(
@@ -201,13 +212,15 @@ impl ServerState {
         // No leading or trailing slashes allowed
         if path.starts_with('/') {
             return Err(format!(
-                "Path '{}' cannot start with '/' - use relative paths only",
+                "Path '{}' cannot start with '/' - \
+                 use relative paths only",
                 path
             ));
         }
         if path.ends_with('/') {
             return Err(format!(
-                "Path '{}' cannot end with '/' - trailing slashes not allowed",
+                "Path '{}' cannot end with '/' - \
+                 trailing slashes not allowed",
                 path
             ));
         }
@@ -215,7 +228,8 @@ impl ServerState {
         // No double slashes allowed
         if path.contains("//") {
             return Err(format!(
-                "Path '{}' contains double slashes '//' - not allowed",
+                "Path '{}' contains double slashes '//' - \
+                 not allowed",
                 path
             ));
         }
@@ -225,7 +239,8 @@ impl ServerState {
         for (i, segment) in segments.iter().enumerate() {
             if segment.is_empty() {
                 return Err(format!(
-                    "Path '{}' has empty segment at position {} - not allowed",
+                    "Path '{}' has empty segment at position {} - \
+                     not allowed",
                     path, i
                 ));
             }
@@ -233,7 +248,8 @@ impl ServerState {
             // Optional: validate segment characters (no spaces, special chars, etc.)
             if segment.trim() != *segment {
                 return Err(format!(
-                    "Path segment '{}' has leading/trailing whitespace - not allowed",
+                    "Path segment '{}' has leading/trailing whitespace - \
+                     not allowed",
                     segment
                 ));
             }
@@ -264,7 +280,8 @@ impl ServerState {
             // Check if this parent path is a publisher
             if self.publishers.contains_key(&current_path) {
                 return Err(format!(
-                    "Path parent should all be directories, but '{}' is associated with a publisher. Consider removing first.",
+                    "Path parent should all be directories, but '{}' is associated \
+                     with a publisher. Consider removing first.",
                     current_path
                 ));
             }

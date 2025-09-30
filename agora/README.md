@@ -4,16 +4,18 @@ Agora is a distributed publisher-subscriber messaging system built on IPv6 with 
 
 ## Core Concepts
 
-**Publisher<T>**: Creates a typed publisher for messages of _Agorable_ type `T`. Each publisher exposes three endpoints:
+**Publisher\<T>**: Creates a typed publisher for messages of _Agorable_ type `T`. Each publisher exposes three endpoints:
 - Service endpoint for typed binary messages
 - String endpoint for type-agnostic monitoring
 - Ping endpoint for health checks and one-time queries
 
-**Subscriber<T>**: Connects to publishers of the same type `T` for streaming typed messages.
+**Subscriber\<T>**: Connects to publishers of the same type `T` for streaming typed messages.
 
 **OmniSubscriber**: Type-agnostic subscriber that receives string representations from any publisher.
 
 **Agorable**: Trait for types that can be published/subscribed. Built-in support for `String`, `i64`, `bool`, `f64`, `f32`.
+
+**Relay\<T>**: Dynamic publisher that relays typed messages from switchable source paths to a fixed destination. Enables contiguous streams from discontinuous sources and cross-metaserver bridging via `swapon()`.
 
 **MetaServer**: Central registry that manages publisher discovery and IPv6 address allocation.
 
@@ -98,6 +100,13 @@ Agora provides Python bindings through PyO3 and Maturin, supporting typed publis
    maturin develop --release
    ```
 
+**Available Python types:**
+- **Publishers**: `PyStringPublisher`, `PyI64Publisher`, `PyBoolPublisher`, `PyF64Publisher`, `PyF32Publisher`
+- **Subscribers**: `PyStringSubscriber`, `PyI64Subscriber`, `PyBoolSubscriber`, `PyF64Subscriber`, `PyF32Subscriber`, `PyOmniSubscriber`
+- **Relays**: `PyStringRelay`, `PyI64Relay`, `PyBoolRelay`, `PyF64Relay`, `PyF32Relay`
+
+Each relay is initialized with `new(name, dest_path, initial_value, metaserver_addr, metaserver_port)` and supports dynamic source switching via `swapon(src_path, metaserver_addr, metaserver_port)`.
+
 **TODO: add python examples later**
 
 Start an agora server by `cargo run --bin metaserver -- -p 8080`. 
@@ -153,15 +162,21 @@ agora/
 │   │   ├── metaserver.rs      # Central service registry
 │   │   ├── metaclient.rs      # Interactive exploration tool
 │   │   ├── publisher_example.rs
-│   │   └── subscriber_example.rs
+│   │   ├── subscriber_example.rs
+│   │   └── relay_example.rs   # Relay usage example
 │   ├── core/                   # Core pub-sub types
 │   │   ├── publisher.rs       # Publisher<T> implementation
 │   │   ├── subscriber.rs      # Subscriber<T> and OmniSubscriber
 │   │   └── common.rs          # Agorable trait
+│   ├── relay.rs               # Relay<T> implementation
 │   ├── metaserver/            # Service registry implementation
 │   ├── ping/                  # Health check RPC system
 │   ├── rawstream/             # Low-level streaming protocol
 │   ├── pywrappers/            # Python bindings
+│   │   ├── publishers.rs      # Typed publisher wrappers
+│   │   ├── subscribers.rs     # Typed subscriber wrappers
+│   │   ├── relays.rs          # Typed relay wrappers
+│   │   └── async_helpers.rs   # Runtime utilities
 │   ├── utils/                 # Address management, path trees
 │   └── constants.rs           # Network configuration
 ├── python/
@@ -178,13 +193,24 @@ agora/
 - Manages service discovery by path
 - Monitors service health and removes stale entries
 
-**Core Types (`core/`)**:
+**Core Types (`core/` and `relay.rs`)**:
 - `Publisher<T>`: Publishes typed messages at a path
   - Maintains three endpoints: service (bytes), omnistring (strings), ping (health)
   - Registers with MetaServer and handles automatic reconnection
 - `Subscriber<T>`: Subscribes to typed messages from a specific path
 - `OmniSubscriber`: Type-agnostic subscriber receiving string representations
 - `Agorable`: Trait for serializable message types
+- `Relay<T>`: Dynamic relay combining Publisher (fixed destination) with switchable Subscriber (dynamic source)
+  - **Architecture**: Spawns two async tasks:
+    - `stream_out`: Consumes from internal channel, publishes to fixed destination
+    - `stream_in`: Subscribes to current source, feeds into channel
+  - **API**:
+    - `new(name, dest_path, initial_value, metaserver_addr, metaserver_port)`: Creates relay with destination publisher
+    - `swapon(src_path, metaserver_addr, metaserver_port)`: Atomically switches to new source by aborting old `stream_in` task and spawning new one
+  - **Use cases**:
+    - <u>Contiguous streaming from discontinuous sources</u>: `src0` streams until $t_1$, `src1` from $t_0 < t_1$ onwards. Initialize relay at `src0`, call `swapon(src1)` during overlap $[t_0, t_1]$ for seamless transition.
+    - <u>Endpoint rerouting</u>: Redirect persistent process publishing to `path0` → `path1` without restart by creating relay at `path1` initialized to `path0`.
+    - <u>Cross-metaserver bridging</u>: Relay from `(metaserver_0, port_0)` → `(metaserver_1, port_1)` remains functional even if `metaserver_0` dies after initial connection. 
 
 **Communication Layer**:
 - **RawStream**: WebSocket-based streaming for real-time message delivery
@@ -193,7 +219,7 @@ agora/
 
 **Python Integration (`pywrappers/`)**:
 - PyO3 bindings for all core types
-- Typed publishers/subscribers for String, i64, bool, f64, f32
+- Typed publishers/subscribers/relays for String, i64, bool, f64, f32
 - Synchronous and streaming APIs 
 
 # Future todo's

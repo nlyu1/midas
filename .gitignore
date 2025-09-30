@@ -9,6 +9,8 @@
 
 # IDE files
 .vscode/
+.cursor/
+.claude/
 .idea/
 *.swp
 *.swo
@@ -50,8 +52,6 @@ coverage/
 *.backup
 
 # Editor directories and files
-.vscode/
-.idea/
 *.suo
 *.ntvs*
 *.njsproj
