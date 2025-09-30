@@ -4,6 +4,7 @@ use futures_util::{SinkExt, StreamExt};
 use std::net::{Ipv6Addr, SocketAddr};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
+use tokio::task::JoinHandle;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_tungstenite::{accept_async, connect_async, tungstenite::Message};
 
@@ -14,6 +15,7 @@ where
     <T as TryFrom<Vec<u8>>>::Error: std::fmt::Display,
 {
     receiver: broadcast::Receiver<T>,
+    bg_handle: JoinHandle<()>,
 }
 
 impl<T> RawStreamClient<T>
@@ -52,7 +54,7 @@ where
         let addr_string = format!("ws://[{}]:{}", address, port);
 
         // Spawn background task for connection handling
-        tokio::spawn(async move {
+        let bg_handle = tokio::spawn(async move {
             loop {
                 // Main reconnection loop - runs indefinitely
                 match connect_async(&addr_string).await {
@@ -116,7 +118,10 @@ where
                 tokio::time::sleep(tokio::time::Duration::from_millis(poll_interval)).await;
             }
         });
-        Ok(Self { receiver: rx })
+        Ok(Self {
+            receiver: rx,
+            bg_handle,
+        })
     }
 
     /// Creates a new independent stream of messages from this client.
@@ -126,12 +131,24 @@ where
     }
 }
 
+impl<T> Drop for RawStreamClient<T>
+where
+    T: Clone + Send + 'static + Into<Vec<u8>> + TryFrom<Vec<u8>>,
+    <T as TryFrom<Vec<u8>>>::Error: std::fmt::Display,
+{
+    fn drop(&mut self) {
+        self.bg_handle.abort();
+    }
+}
+
 pub struct RawStreamServer<T>
 where
     T: Clone + Send + 'static + Into<Vec<u8>> + TryFrom<Vec<u8>>,
     <T as TryFrom<Vec<u8>>>::Error: std::fmt::Display,
 {
     sender: tokio::sync::mpsc::UnboundedSender<T>,
+    ingest_handle: JoinHandle<()>,
+    connection_handle: JoinHandle<()>,
 }
 
 impl<T> RawStreamServer<T>
@@ -155,14 +172,14 @@ where
 
         // Task 1: Ingestion - pull data from input_stream and broadcast it
         let ingest_tx = broadcast_tx.clone();
-        tokio::spawn(async move {
+        let ingest_handle = tokio::spawn(async move {
             while let Some(data) = input_stream.next().await {
                 let _ = ingest_tx.send(data); // Ignore error if no clients
             }
         });
 
         // Task 2: Connection handling - accept new clients and serve them
-        tokio::spawn(async move {
+        let connection_handle = tokio::spawn(async move {
             loop {
                 if let Ok((tcp_stream, _)) = listener.accept().await {
                     let mut client_rx = broadcast_tx.subscribe();
@@ -187,12 +204,27 @@ where
             }
         });
 
-        Ok(Self { sender: tx })
+        Ok(Self {
+            sender: tx,
+            ingest_handle,
+            connection_handle,
+        })
     }
 
     pub fn publish(&self, value: T) -> OrError<()> {
         self.sender
             .send(value)
             .map_err(|_| "Channel closed".to_string())
+    }
+}
+
+impl<T> Drop for RawStreamServer<T>
+where
+    T: Clone + Send + 'static + Into<Vec<u8>> + TryFrom<Vec<u8>>,
+    <T as TryFrom<Vec<u8>>>::Error: std::fmt::Display,
+{
+    fn drop(&mut self) {
+        self.ingest_handle.abort();
+        self.connection_handle.abort();
     }
 }

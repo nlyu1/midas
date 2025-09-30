@@ -11,6 +11,7 @@ use tarpc::{
     server::{self, Channel, incoming::Incoming},
     tokio_serde::formats::Json,
 };
+use tokio::task::JoinHandle;
 
 #[derive(derive_new::new)]
 pub struct Payload {
@@ -36,6 +37,7 @@ impl PingRpc for PingRpcServer {
 
 pub struct PingServer {
     payload: Arc<RwLock<Payload>>,
+    bg_handle: JoinHandle<()>,
 }
 
 impl PingServer {
@@ -69,14 +71,20 @@ impl PingServer {
                 .for_each(|_| async {})
                 .await;
         };
-        tokio::spawn(background_connection);
+        let bg_handle = tokio::spawn(background_connection);
 
-        Ok(Self { payload })
+        Ok(Self { payload, bg_handle })
     }
 
     pub fn update_payload(self: &mut Self, vec_payload: Vec<u8>, str_payload: String) -> () {
         let mut payload = self.payload.write().unwrap();
         payload.vec_payload = vec_payload;
         payload.str_payload = str_payload;
+    }
+}
+
+impl Drop for PingServer {
+    fn drop(&mut self) {
+        self.bg_handle.abort();
     }
 }

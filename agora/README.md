@@ -104,7 +104,7 @@ Start an agora server by `cargo run --bin metaserver -- -p 8080`.
 
 ## Network Setup (Ubuntu)
 
-Agora uses IPv6 Unique Local Addresses (ULA) for scalable addressing and service isolation. The MetaServer automatically allocates IPv6 addresses from the `fde5:402f:ab0a:1::/64` subnet for each publisher.
+Agora uses IPv6 Unique Local Addresses (ULA) for scalable addressing and service isolation. The MetaServer automatically allocates IPv6 addresses from the `fde5:402f:ab0a:1:<uid>::/80` subnet for each publisher, where `<uid>` is the MetaServer's port number.
 
 ### Automatic Setup
 Run the provided script for persistent configuration:
@@ -140,7 +140,7 @@ If you prefer manual configuration:
 
 ### Address Allocation
 - **MetaServer**: `[::1]:8080` (localhost)
-- **Publishers**: `fde5:402f:ab0a:1::N:PORT` where N is the publisher ID
+- **Publishers**: `fde5:402f:ab0a:1:<uid>:<suffix>:PORT` where `<uid>` is the MetaServer port and `<suffix>` is a random 48-bit identifier
 - **Port scheme**: 8081 (service), 8082 (omnistring), 8083 (ping)
 
 ## Architecture
@@ -174,7 +174,7 @@ agora/
 
 **MetaServer (`metaserver/`)**:
 - Central service registry using gRPC/tarpc
-- Allocates IPv6 addresses for publishers
+- Allocates IPv6 addresses for publishers using port-based UID addressing
 - Manages service discovery by path
 - Monitors service health and removes stale entries
 

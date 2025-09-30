@@ -1,11 +1,12 @@
 use super::protocol::AgoraMeta;
 use super::publisher_info::PublisherInfo;
-use crate::constants::{PUBLISHER_SERVICE_PORT, PUBLISHER_OMNISTRING_PORT, PUBLISHER_PING_PORT};
+use crate::constants::{PUBLISHER_OMNISTRING_PORT, PUBLISHER_PING_PORT, PUBLISHER_SERVICE_PORT};
+use crate::ping::PingClient;
 use crate::utils::{OrError, PublisherAddressManager, TreeNode, TreeNodeRef, TreeTrait};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use crate::ping::PingClient; 
+use tokio::sync::{Mutex, RwLock};
+use tokio::task::JoinHandle;
 
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use tarpc::context;
@@ -16,9 +17,9 @@ use tarpc::{
     server::{self, Channel},
     tokio_serde::formats::Json,
 };
-use tokio::time::{interval, Duration};
+use tokio::time::{Duration, interval};
 
-const CHECK_PUBLISHER_LIVELINESS_EVERY_MS: u64 = 500; 
+const CHECK_PUBLISHER_LIVELINESS_EVERY_MS: u64 = 500;
 
 // Shared server state that will be accessed by all connections
 #[derive(Debug)]
@@ -30,7 +31,7 @@ pub struct ServerState {
 }
 
 // Todo: separate two things for serverState: query new address, and (2) confirm that publisher is running
-// After confirmation, server runs a ping-client. There's also a 
+// After confirmation, server runs a ping-client. There's also a
 
 impl ServerState {
     pub fn new(uid: u16) -> Self {
@@ -80,8 +81,7 @@ impl ServerState {
         let string_socket = SocketAddrV6::new(service_address, PUBLISHER_OMNISTRING_PORT, 0, 0);
         let ping_socket = SocketAddrV6::new(service_address, PUBLISHER_PING_PORT, 0, 0);
 
-        let publisher_info =
-            PublisherInfo::new(&name, service_socket, string_socket, ping_socket);
+        let publisher_info = PublisherInfo::new(&name, service_socket, string_socket, ping_socket);
         println!(
             "Registered publisher {:?} at path {}",
             publisher_info, &path
@@ -93,12 +93,18 @@ impl ServerState {
     pub async fn confirm_publisher(&mut self, path: String) -> OrError<()> {
         // Checks that publisher has already been registered
         if !self.publishers.contains_key(&path) {
-            return Err(format!("Metaserver confirmation error: please register path {} before confirming", path));
+            return Err(format!(
+                "Metaserver confirmation error: please register path {} before confirming",
+                path
+            ));
         }
 
         // Checks against duplicate confirmation
         if self.confirmed_publishers.contains_key(&path) {
-            return Err(format!("Metaserver confirmation error: {} already registered and confirmed", path));
+            return Err(format!(
+                "Metaserver confirmation error: {} already registered and confirmed",
+                path
+            ));
         }
 
         // Extract address and port from stored info
@@ -108,11 +114,28 @@ impl ServerState {
         // Initialize a ping client
         let publisher_ipv6 = match publisher_address {
             std::net::IpAddr::V6(addr) => addr,
-            std::net::IpAddr::V4(_) => return Err("IPv4 addresses not supported for ping client".to_string()),
+            std::net::IpAddr::V4(_) => {
+                return Err("IPv4 addresses not supported for ping client".to_string());
+            }
         };
-        let pingclient = PingClient::new(publisher_ipv6, publisher_port).await
-            .map_err(|e| format!("Failed to create ping client: {}", e))?;
-        let _ = pingclient.ping().await?; // Make sure that we can ping and obtain results
+        let pingclient = PingClient::new(publisher_ipv6, publisher_port)
+            .await
+            .map_err(|e| {
+                let _ = self.remove_publisher(path.clone());
+                eprintln!(
+                    "Removed registered publisher {} upon unsuccessful confirmation",
+                    &path
+                );
+                format!("Failed to create ping client! {}", e)
+            })?;
+        let _ = pingclient.ping().await.map_err(|e| {
+            let _ = self.remove_publisher(path.clone());
+            eprintln!(
+                "Removed registered publisher {} upon unsuccessful confirmation",
+                &path
+            );
+            e
+        })?; // Make sure that we can ping and obtain results
 
         // Now that things are ok, add pingclient
         self.confirmed_publishers.insert(path, pingclient);
@@ -129,8 +152,10 @@ impl ServerState {
         match self.publishers.remove(&path) {
             Some(publisher_info) => {
                 self.path_tree.remove_child_and_branch(&path)?;
-                self.confirmed_publishers.remove(&path).ok_or("Removed publisher is registered but not confirmed")?;
-                self.address_manager.free_address(publisher_info.service_socket.ip().clone())?; 
+                // Remove from confirmed_publishers if it exists (it may not if confirmation failed)
+                self.confirmed_publishers.remove(&path);
+                self.address_manager
+                    .free_address(publisher_info.service_socket.ip().clone())?;
                 Ok(publisher_info)
             }
             None => Err(format!(
@@ -148,15 +173,21 @@ impl ServerState {
         // Validate path format strictly
         self.validate_path_format(&path)?;
 
-        match (self.publishers.get(&path), self.confirmed_publishers.get_mut(&path)) {
+        match (
+            self.publishers.get(&path),
+            self.confirmed_publishers.get_mut(&path),
+        ) {
             (Some(publisher), Some(pingclient)) => {
-                pingclient.ping().await
+                pingclient
+                    .ping()
+                    .await
                     .map_err(|_| format!("Cannot ping {}. Publisher might be stale", path))?;
                 Ok(publisher.clone())
-            },
-            (Some(_), None) => {
-                Err(format!("Publisher at {} is registered but not confirmed", path))
-            },
+            }
+            (Some(_), None) => Err(format!(
+                "Publisher at {} is registered but not confirmed",
+                path
+            )),
             (None, _) => Err(format!("Publisher not registered at {}", path)),
         }
     }
@@ -309,6 +340,7 @@ impl ServerState {
 #[derive(Clone)]
 pub struct AgoraMetaServer {
     state: Arc<RwLock<ServerState>>,
+    bg_handle: Arc<Mutex<JoinHandle<()>>>,
 }
 
 impl AgoraMeta for AgoraMetaServer {
@@ -344,9 +376,10 @@ impl AgoraMeta for AgoraMetaServer {
 }
 
 impl AgoraMetaServer {
-    fn new(shared_state: Arc<RwLock<ServerState>>) -> Self {
+    fn new(shared_state: Arc<RwLock<ServerState>>, bg_handle: Arc<Mutex<JoinHandle<()>>>) -> Self {
         Self {
             state: shared_state,
+            bg_handle,
         }
     }
 
@@ -364,7 +397,7 @@ impl AgoraMetaServer {
 
         // Start a background process to obtain write lock on shared_state and prunes. Should execute once every constant (see top) number of ms
         let pruning_state = Arc::clone(&shared_state);
-        tokio::spawn(async move {
+        let bg_handle = Arc::new(Mutex::new(tokio::spawn(async move {
             let mut interval = interval(Duration::from_millis(CHECK_PUBLISHER_LIVELINESS_EVERY_MS));
             loop {
                 interval.tick().await;
@@ -376,7 +409,7 @@ impl AgoraMetaServer {
                     println!("Pruned stale publishers: {:?}", pruned_paths);
                 }
             }
-        });
+        })));
 
         // Listener yields a stream of connections. Each connection is a stream of requests.
         listener
@@ -390,7 +423,8 @@ impl AgoraMetaServer {
             .map(|channel| {
                 // Each channel **represents a single, persistent connection to a client.**
                 // BUT they all share the same server state!
-                let server = AgoraMetaServer::new(Arc::clone(&shared_state));
+                let server =
+                    AgoraMetaServer::new(Arc::clone(&shared_state), Arc::clone(&bg_handle));
                 channel.execute(server.serve()).for_each(
                     // Async wrapper around tokio::spawn
                     |fut| async {
@@ -405,5 +439,17 @@ impl AgoraMetaServer {
             .await;
 
         Ok(())
+    }
+}
+
+impl Drop for AgoraMetaServer {
+    fn drop(&mut self) {
+        // Only cleanup if this is the last reference
+        if Arc::strong_count(&self.bg_handle) == 1 {
+            if let Ok(handle_guard) = self.bg_handle.try_lock() {
+                handle_guard.abort();
+                println!("Background pruning task stopped");
+            }
+        }
     }
 }

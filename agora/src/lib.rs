@@ -4,12 +4,14 @@ pub mod metaserver;
 mod ping;
 mod pywrappers;
 pub mod rawstream;
+mod relay;
 pub mod utils;
 
 // Re-export core types at the top level for easy access
 pub use core::common::Agorable;
 pub use core::publisher::Publisher;
 pub use core::subscriber::{OmniSubscriber, Subscriber};
+pub use relay::Relay;
 
 use pyo3::prelude::*;
 
@@ -32,6 +34,13 @@ fn agora(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pywrappers::publishers::PyBoolPublisher>()?;
     m.add_class::<pywrappers::publishers::PyF64Publisher>()?;
     m.add_class::<pywrappers::publishers::PyF32Publisher>()?;
+
+    // Typed relays
+    m.add_class::<pywrappers::relays::PyStringRelay>()?;
+    m.add_class::<pywrappers::relays::PyI64Relay>()?;
+    m.add_class::<pywrappers::relays::PyBoolRelay>()?;
+    m.add_class::<pywrappers::relays::PyF64Relay>()?;
+    m.add_class::<pywrappers::relays::PyF32Relay>()?;
 
     // Typed iterators
     m.add_class::<pywrappers::subscribers::PyStringIterator>()?;
