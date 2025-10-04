@@ -1,3 +1,4 @@
+use crate::tokio_tungstenite::protocol::Utf8Bytes;
 use crate::types::{TradingSymbol, UtcNanoTimestamp};
 
 // See docs.binance.us/#all-market-24h-change-stream
@@ -93,8 +94,7 @@ pub struct OrderbookDepthUpdate {
     pub ask_levels: Vec<PriceLevel>,
 }
 
-enum StreamEvent {
-    Bbo,
-    Trade,
-    OrderbookDiff,
+pub trait Streamable: Agorable + Sized {
+    pub fn of_json_bytes(msg: Utf8Bytes) -> OrError<Self>;
+    pub fn prefix() -> String;
 }
