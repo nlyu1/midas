@@ -6,6 +6,8 @@ use std::net::{IpAddr, Ipv6Addr};
 use tarpc::{client, context, tokio_serde::formats::Json};
 
 pub struct AgoraClient {
+    address: Ipv6Addr,
+    port: u16,
     client: AgoraMetaClient,
 }
 
@@ -16,7 +18,11 @@ impl AgoraClient {
         let mut transport = tarpc::serde_transport::tcp::connect(server_addr, Json::default);
         transport.config_mut().max_frame_length(usize::MAX);
         let client = AgoraMetaClient::new(client::Config::default(), transport.await?).spawn();
-        Ok(Self { client })
+        Ok(Self {
+            address,
+            port,
+            client,
+        })
     }
 
     pub async fn register_publisher(&self, name: String, path: String) -> OrError<PublisherInfo> {
@@ -65,5 +71,12 @@ impl AgoraClient {
             .await
             .map_err(|e| format!("RPC error: {}", e))?;
         result
+    }
+}
+
+impl Clone for AgoraClient {
+    fn clone(&self) -> Self {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move { Self::new(self.address, self.port).await.unwrap() })
     }
 }

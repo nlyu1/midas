@@ -8,7 +8,7 @@ mod relay;
 pub mod utils;
 
 // Re-export core types at the top level for easy access
-pub use core::common::Agorable;
+pub use core::common::{Agorable, AgorableOption};
 pub use core::publisher::Publisher;
 pub use core::subscriber::{OmniSubscriber, Subscriber};
 pub use relay::Relay;
