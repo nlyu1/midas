@@ -47,14 +47,13 @@ impl<T: Agorable> Subscriber<T> {
         let bytes_path_str = format!("{}/bytes", normalized_path);
 
         let rawstreamclient: RawStreamClient<Vec<u8>> =
-            RawStreamClient::new(host_gateway_connection.clone(), &bytes_path_str, None, None).map_err(
-                |e| {
+            RawStreamClient::new(host_gateway_connection.clone(), &bytes_path_str, None, None)
+                .map_err(|e| {
                     format!(
                         "Agora subscriber Error: failed to create byte rawstream client {}",
                         e
                     )
-                },
-            )?;
+                })?;
         let pingclient = PingClient::new(&normalized_path, host_gateway_connection)
             .await
             .map_err(|e| format!("Agora subscriber Error: failed to create ping client {}", e))?;
@@ -69,8 +68,12 @@ impl<T: Agorable> Subscriber<T> {
 
     pub async fn get(&mut self) -> OrError<T> {
         let (current_bytes, _, _td) = self.pingclient.ping().await?;
-        let current_value: T = postcard::from_bytes(&current_bytes)
-            .map_err(|e| format!("Failed to deserialize current value: {}", e))?;
+        let current_value: T = postcard::from_bytes(&current_bytes).map_err(|e| {
+            format!(
+                "AgoraSubscriber Error: failed to deserialize current value in get() method: {}",
+                e
+            )
+        })?;
         Ok(current_value)
     }
 
@@ -128,15 +131,18 @@ impl OmniSubscriber {
         // Append "/string" suffix for string rawstream
         let string_path_str = format!("{}/string", normalized_path);
 
-        let rawstreamclient: RawStreamClient<String> =
-            RawStreamClient::new(host_gateway_connection.clone(), &string_path_str, None, None).map_err(
-                |e| {
-                    format!(
-                        "Agora subscriber Error: failed to create string rawstream client {}",
-                        e
-                    )
-                },
-            )?;
+        let rawstreamclient: RawStreamClient<String> = RawStreamClient::new(
+            host_gateway_connection.clone(),
+            &string_path_str,
+            None,
+            None,
+        )
+        .map_err(|e| {
+            format!(
+                "Agora subscriber Error: failed to create string rawstream client {}",
+                e
+            )
+        })?;
 
         let pingclient = PingClient::new(&normalized_path, host_gateway_connection)
             .await

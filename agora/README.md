@@ -15,7 +15,7 @@ Agora is a distributed publisher-subscriber messaging system built with path-bas
 
 **Agorable**: Trait for types that can be published/subscribed. Built-in support for `String`, `i64`, `bool`, `f64`, `f32`.
 
-**MetaServer**: Central registry that manages publisher discovery and IPv6 address allocation. 
+**MetaServer**: Central registry that manages publisher discovery and location tracking. 
 
 **Relay\<T>**: Dynamic publisher that relays typed messages from switchable source paths to a fixed destination. Enables contiguous streams from discontinuous sources and cross-metaserver bridging via `swapon()`.
 
@@ -32,10 +32,11 @@ Agora is a distributed publisher-subscriber messaging system built with path-bas
    # Metaserver started on 192.168.0.75:8080
    ```
 
-3. **Start gateway on each node** (including main): 
+3. **Start gateway on each publishing node** (including main):
    ```bash
    cargo run --bin gateway
    # Agora Gateway listening on 192.168.0.75:8081
+   # - Ready to proxy connections
    ```
 
 4. **Explore with MetaClient on any node** (addr=localhost, port=8080) if not passed:
@@ -65,20 +66,24 @@ cargo run --bin metaserver
 # Metaserver started on 192.168.0.75:8080
 ```
 ### Publish messages
-Run on any node with connection to main (can be main): 
-1. **Start gateway process**. Only the publisher needs to start gateway. 
-```bash 
-# Replace with main node IP
+Run on any node with connection to main (can be main):
+
+1. **Start gateway process** (only publishing nodes need a gateway):
+```bash
 cargo run --bin gateway
-# Gateway running at 192.168.0.69:8081
+# Agora Gateway listening on 192.168.0.69:8081
+# - Ready to proxy connections:
+#   - /rawstream/{path} → /tmp/agora/{path}/rawstream.sock
+#   - /ping/{path} → /tmp/agora/{path}/ping.sock
 ```
-2. **Run example publisher**
-```bash 
+
+2. **Run example publisher**:
+```bash
 cargo run --bin publisher -- --host 192.168.0.75
 ```
 
 ### Subscribe to messages
-Run on any machine with publisher & main node connection: subscriber **don't need to know publisher gateway port**! 
+Run on any node with connection to metaserver. Subscribers **automatically discover publisher gateway addresses** via metaserver: 
 ```bash
 # Provide metaserver IP (default localhost) and port (default 8080) 
 cargo run --bin subscriber -- --host 192.168.0.75
@@ -100,21 +105,73 @@ Relays provide dynamic data routing across agora paths and metaservers. Use-case
 1. Hot-swapping metaserver without restarting existing publishers. 
 2. Combining data streams. 
 
-Run on the main node: 
+We exemplify usage using two nodes: first **start metaservers** 
 ```bash
+# Node 0
 cargo run --bin metaserver # Metaserver active on 192.168.0.75:8080
-# Separate terminal: 
 cargo run --bin gateway # Agora Gateway listening on 192.168.0.75:8081
+# Node 1
+cargo run --bin metaserver # Metaserver active on 192.168.0.69:8080
+```
+Start two publishers on node 0: 
+```bash
 # Separate terminal: create `src0_node0` publisher by answering `src0_node0` to all three prompts
 cargo run --bin publisher 
 # Separate terminal: create `src1_node0` publisher by answering `src0_node0` to all three prompts
 cargo run --bin publisher 
 ```
-
-```bash
+Start a relay on node 0, _publishing to node 1_: 
+```bash 
+# Run on node 0. Enter `dest_node1` when prompted, with any initial value
+cargo run --bin relay_example -- --host 192.168.0.69 
+# When prompted, swap on `src0_node0` from `192.168.0.75`
 ```
+Start a subscriber on node 1
+```bash
+# Node 1. Subscribe to `dest_node1`
+`cargo run --bin subscriber 
+```
+Now, try publishing values in the `src0_node0` and `src1_node0` processes separately: only one of them will be published to `dest_node1`, and this can be controlled by the relay process. 
+- **Sharp edge!!**: user is responsible for creating `Relay<T>` of the correct type as the publisher! Channel type mismatch will result in opaque runtime errors. 
 
 ## Architecture
+
+### Service Discovery
+One Agora node runs the **metaserver** process, which responds to TCP connections on port 8080 (default `METASERVER_PORT` in `src/constants.rs`). The metaserver is implemented as a [TARPC](https://docs.rs/tarpc/latest/tarpc/) RPC server.
+- For each service, the metaserver stores the publisher's **IP address** and **gateway port**. Subscribers query the metaserver to discover publisher locations.
+- The metaserver maintains a **ping client** to each registered service, polling every 500ms (`CHECK_PUBLISHER_LIVELINESS_EVERY_MS`). Non-responsive services are automatically removed from the registry.
+
+### Publishing Processes
+Each publishing Agora node runs a **gateway** process, which listens for TCP WebSocket connections on port 8081 (default `GATEWAY_PORT` in `src/constants.rs`). Each `Publisher<T>` instance creates three Unix Domain Socket (UDS) WebSocket servers on the local node:
+
+1. **Typed binary stream**: `/tmp/agora/{path}/bytes/rawstream.sock`
+   - Serves `Vec<u8>` payloads serialized via [Postcard](https://docs.rs/postcard/)
+   - Accessed by typed `Subscriber<T>` instances
+
+2. **String stream**: `/tmp/agora/{path}/string/rawstream.sock`
+   - Serves human-readable `String` representations (via `Display` trait)
+   - Accessed by `OmniSubscriber` instances for type-agnostic monitoring
+
+3. **Ping endpoint**: `/tmp/agora/{path}/ping.sock`
+   - Serves current value snapshots and health checks
+   - Returns both binary and string payloads with timestamps
+
+### Subscribing Processes
+Each subscriber instantiates an `AgoraClient` (metaclient), which queries the metaserver for the publisher's IP and gateway port. The subscriber then connects to the remote publisher via the gateway's TCP WebSocket endpoints:
+
+- **Typed subscriber** (`Subscriber<T>`):
+  - Stream: `ws://{publisher_ip}:{gateway_port}/rawstream/{path}/bytes`
+  - Ping: `ws://{publisher_ip}:{gateway_port}/ping/{path}`
+
+- **Type-agnostic subscriber** (`OmniSubscriber`):
+  - Stream: `ws://{publisher_ip}:{gateway_port}/rawstream/{path}/string`
+  - Ping: `ws://{publisher_ip}:{gateway_port}/ping/{path}`
+
+The **gateway** acts as a bidirectional proxy, forwarding each TCP WebSocket connection to the corresponding local UDS endpoint:
+- `ws://{gateway_ip}:{gateway_port}/rawstream/{path}` ↔ `/tmp/agora/{path}/rawstream.sock`
+- `ws://{gateway_ip}:{gateway_port}/ping/{path}` ↔ `/tmp/agora/{path}/ping.sock`
+
+This architecture decentralizes data flow: the metaserver only handles discovery, while actual message streaming occurs directly between gateways and publishers via WebSocket pipes. 
 
 ### Project Structure
 ```
@@ -150,214 +207,46 @@ agora/
 ### Component Overview
 
 **MetaServer (`metaserver/`)**:
-- Central service registry using gRPC/tarpc
-- Allocates IPv6 addresses for publishers using port-based UID addressing
-- Manages service discovery by path
-- Monitors service health and removes stale entries
+- Central service registry using [TARPC](https://docs.rs/tarpc/latest/tarpc/) RPC framework
+- Stores publisher locations (IP address and gateway port) indexed by path
+- Provides service discovery via `get_publisher_info(path)` and `register_publisher(name, path, gateway_port)` RPC methods
+- Monitors service health via WebSocket ping clients, removing non-responsive publishers every 500ms
 
 **Core Types (`core/` and `relay.rs`)**:
 - `Publisher<T>`: Publishes typed messages at a path
-  - Maintains three endpoints: service (bytes), omnistring (strings), ping (health)
-  - Registers with MetaServer and handles automatic reconnection
-- `Subscriber<T>`: Subscribes to typed messages from a specific path
+  - Creates three local UDS WebSocket endpoints: bytes (`/tmp/agora/{path}/bytes/rawstream.sock`), strings (`/tmp/agora/{path}/string/rawstream.sock`), and ping (`/tmp/agora/{path}/ping.sock`)
+  - Registers with MetaServer, storing its gateway connection details for subscriber discovery
+  - Serializes values to both Postcard binary format and `Display` string format
+- `Subscriber<T>`: Subscribes to typed binary messages from a specific path
+  - Queries MetaServer for publisher location, then connects to remote gateway
+  - Uses `get()` for current value snapshot via ping, `get_stream()` for continuous updates
 - `OmniSubscriber`: Type-agnostic subscriber receiving string representations
-- `Agorable`: Trait for serializable message types
-- `Relay<T>`: Dynamic relay combining Publisher (fixed destination) with switchable Subscriber (dynamic source)
-  - **Architecture**: Spawns two async tasks:
-    - `stream_out`: Consumes from internal channel, publishes to fixed destination
-    - `stream_in`: Subscribes to current source, feeds into channel
+  - Identical API to `Subscriber<T>`, but connects to string endpoint instead of bytes
+- `Agorable`: Trait for publishable types (requires `Serialize + Deserialize + Display + Clone + Send`)
+- `Relay<T>`: Dynamic message router combining fixed-destination Publisher with switchable-source Subscriber
+  - **Architecture**: Two async tasks communicate via unbounded channel:
+    - `stream_out`: Consumes from channel → publishes to fixed destination path
+    - `stream_in`: Subscribes to current source path → sends to channel
   - **API**:
-    - `new(name, dest_path, initial_value, metaserver_addr, metaserver_port)`: Creates relay with destination publisher
-    - `swapon(src_path, metaserver_addr, metaserver_port)`: Atomically switches to new source by aborting old `stream_in` task and spawning new one
+    - `new(name, dest_path, initial_value, dest_metaserver_connection, local_gateway_port)`: Creates relay with destination publisher
+    - `swapon(src_path, src_metaserver_connection)`: Atomically switches source by aborting old `stream_in` task and spawning new subscriber
   - **Use cases**:
     - <u>Contiguous streaming from discontinuous sources</u>: `src0` streams until $t_1$, `src1` from $t_0 < t_1$ onwards. Initialize relay at `src0`, call `swapon(src1)` during overlap $[t_0, t_1]$ for seamless transition.
     - <u>Endpoint rerouting</u>: Redirect persistent process publishing to `path0` → `path1` without restart by creating relay at `path1` initialized to `path0`.
-    - <u>Cross-metaserver bridging</u>: Relay from `(metaserver_0, port_0)` → `(metaserver_1, port_1)` remains functional even if `metaserver_0` dies after initial connection. 
+    - <u>Cross-metaserver bridging</u>: Relay from `(metaserver_0, port_0)` → `(metaserver_1, port_1)` remains functional even if `metaserver_0` dies after initial connection, enabling multi-cluster communication.
 
 **Communication Layer**:
-- **RawStream**: WebSocket-based streaming for real-time message delivery
-- **Ping System**: tarpc-based RPC for health checks and one-time queries
-- **IPv6 Addressing**: ULA subnet for scalable service isolation
+- **Gateway (`gateway.rs`)**: Bidirectional TCP-to-UDS WebSocket proxy, enabling cross-node communication
+  - Maps `/rawstream/{path}` → `/tmp/agora/{path}/rawstream.sock` and `/ping/{path}` → `/tmp/agora/{path}/ping.sock`
+  - Each connection spawns independent forwarding tasks for decentralized data flow
+- **RawStream (`rawstream/`)**: WebSocket-based pub-sub protocol using Tokio broadcast channels
+  - Server: Binds UDS listener, fans out messages to all connected clients via `broadcast::channel`
+  - Client: Connects via gateway WebSocket, auto-reconnects on failure with 100ms retry interval
+- **Ping (`ping/`)**: WebSocket-based request-response protocol for health checks and current value queries
+  - Server: Returns `PingResponse { vec_payload, str_payload, timestamp }` on `"ping"` text message
+  - Client: Sends `"ping"`, receives JSON response, calculates round-trip time
 
 **Python Integration (`pywrappers/`)**:
 - PyO3 bindings for all core types
 - Typed publishers/subscribers/relays for String, i64, bool, f64, f32
 - Synchronous and streaming APIs 
-
-# Future todo's
-
-1. Component integration tests
-2. Browser explorer & plotting (typescript integration)
-
-Current Architecture Analysis
-
-Your system has these key components:
-- MetaServer: Central registry for publishers (src/bin/metaserver.rs)
-- Publishers: Data producers with ping + rawstream servers (src/core/publisher.rs)
-- Subscribers: Data consumers (src/core/subscriber.rs)
-- RawStream: WebSocket streaming (src/rawstream.rs)
-- Ping: Heartbeat/liveness system (src/ping/)
-
-Recommended Integration Testing Strategy
-
-1. Test Infrastructure Setup
-
-Add dev-dependencies to Cargo.toml:
-[dev-dependencies]
-tokio-test = "0.4"
-serial_test = "3.0"
-tempfile = "3.8"
-
-2. Testing Framework Architecture
-
-Create tests/integration/ directory structure:
-tests/
-├── integration/
-│   ├── mod.rs                 # Test utilities & helpers
-│   ├── test_metaserver.rs     # MetaServer integration tests
-│   ├── test_pubsub.rs         # Publisher-Subscriber integration
-│   ├── test_rawstream.rs      # RawStream integration tests
-│   └── test_full_system.rs    # End-to-end system tests
-└── common/
-   ├── mod.rs
-   ├── test_metaserver.rs     # MetaServer test helper
-   ├── test_publisher.rs      # Publisher test helper
-   └── test_subscriber.rs     # Subscriber test helper
-
-3. Key Testing Patterns
-
-Test Helper Infrastructure (tests/common/mod.rs):
-- MetaServerFixture: Spawns metaserver on random port, manages lifecycle
-- PublisherFixture: Creates publishers with cleanup
-- SubscriberFixture: Creates subscribers with timeout handling
-- NetworkIsolation: Uses unique IPv6 addresses per test (your PublisherAddressManager is
-perfect for this)
-
-Port Management Strategy:
-- Use random available ports (avoid conflicts)
-- Leverage your existing PublisherAddressManager for IPv6 address allocation
-- Each test gets isolated network namespace
-
-4. Test Categories
-
-A. Component Integration Tests:
-// tests/integration/test_metaserver.rs
-#[tokio::test]
-async fn test_publisher_registration_and_discovery() {
-   let metaserver = MetaServerFixture::new().await;
-   let publisher = PublisherFixture::new("test_pub", "test/path",
-metaserver.addr()).await;
-   let subscriber = SubscriberFixture::new("test/path", metaserver.addr()).await;
-
-   // Test registration, discovery, and communication
-}
-
-B. Service Interaction Tests:
-- Publisher registration → MetaServer storage → Subscriber discovery
-- Ping heartbeat flow between components
-- RawStream WebSocket connection and data flow
-- Publisher failure → MetaServer cleanup → Subscriber reconnection
-
-C. Failure Mode Tests:
-- Network partitions (kill connections temporarily)
-- Component crashes (kill processes, restart)
-- Resource exhaustion scenarios
-- Concurrent access patterns
-
-5. Implementation Recommendations
-
-Test Utilities (tests/common/test_metaserver.rs):
-pub struct MetaServerFixture {
-   handle: JoinHandle<()>,
-   address: Ipv6Addr,
-   port: u16,
-}
-
-impl MetaServerFixture {
-   pub async fn new() -> Self {
-         let port = get_random_port();
-         let address = Ipv6Addr::LOCALHOST;
-
-         let handle = tokio::spawn(async move {
-            AgoraMetaServer::run_server(address, port).await.unwrap()
-         });
-
-         // Wait for server to be ready
-         wait_for_server_ready(address, port).await;
-
-         Self { handle, address, port }
-   }
-}
-
-impl Drop for MetaServerFixture {
-   fn drop(&mut self) {
-         self.handle.abort();
-   }
-}
-
-Isolated Testing Pattern:
-#[tokio::test]
-#[serial_test::serial] // Prevent concurrent network tests
-async fn test_publisher_subscriber_flow() {
-   let metaserver = MetaServerFixture::new().await;
-
-   // Publisher publishes data
-   let mut publisher = Publisher::new(
-         "test_publisher".to_string(),
-         "stocks/AAPL".to_string(),
-         StockPrice { price: 150.0 },
-         metaserver.address(),
-         metaserver.port()
-   ).await.unwrap();
-
-   // Subscriber receives data
-   let mut subscriber: Subscriber<StockPrice> = Subscriber::new(
-         "stocks/AAPL".to_string(),
-         metaserver.address(),
-         metaserver.port()
-   ).await.unwrap();
-
-   // Test data flow
-   publisher.publish(StockPrice { price: 155.0 }).await.unwrap();
-   let received = subscriber.stream().next().await.unwrap();
-   assert_eq!(received.price, 155.0);
-}
-
-6. Advantages of This Approach
-
-Minimal Additional Code:
-- Reuses your existing components as-is
-- Test fixtures are lightweight wrappers
-- Uses your PublisherAddressManager for network isolation
-
-Robust & Reliable:
-- Each test runs in isolation (unique ports/addresses)
-- Proper cleanup prevents resource leaks
-- Timeout handling prevents hanging tests
-- serial_test prevents network conflicts
-
-Comprehensive Coverage:
-- Tests actual network communication
-- Validates complete interaction flows
-- Catches integration bugs unit tests miss
-- Tests failure scenarios effectively
-
-7. Test Execution Strategy
-
-Development Workflow:
-# Run unit tests (fast)
-cargo test --lib
-
-# Run integration tests (slower)
-cargo test --test integration
-
-# Run specific integration test
-cargo test --test integration test_publisher_subscriber_flow
-
-This approach gives you thorough integration testing while leveraging your existing
-architecture and minimizing additional complexity. The key is creating lightweight test
-fixtures that manage component lifecycles and using your address manager for network
-isolation.
-
-#### Checking that metaserver is actually running: 
-`ss -6 -tlnp | grep 8080`

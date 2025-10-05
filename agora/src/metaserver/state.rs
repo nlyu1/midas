@@ -116,7 +116,7 @@ impl ServerState {
         })?; // Make sure that we can ping and obtain results
 
         // Now that things are ok, add pingclient
-        println!("Publisher {} confirmd.", &path);
+        println!("Publisher {} confirmed.", &path);
         self.confirmed_publishers.insert(path, pingclient);
         Ok(())
     }

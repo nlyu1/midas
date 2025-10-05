@@ -1,8 +1,10 @@
 use agora::constants::{GATEWAY_PORT, METASERVER_PORT};
-use agora::{ConnectionHandle, Relay};
+use agora::{Agorable, ConnectionHandle, Relay};
 use clap::Parser;
 use indoc::indoc;
 use local_ip_address::local_ip;
+use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 use std::io::{self, Write};
 use std::net::IpAddr;
 use tokio;
@@ -21,6 +23,20 @@ struct Cli {
     #[arg(long, default_value_t = GATEWAY_PORT)]
     gateway_port: u16,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Message {
+    content: String,
+    timestamp: u64,
+}
+
+impl Display for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}] {}", self.timestamp, self.content)
+    }
+}
+
+impl Agorable for Message {}
 
 fn read_input(prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
     print!("{}", prompt);
@@ -52,7 +68,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dest_path = read_input("Enter destination path (e.g., relay/output): ")?;
     let name = dest_path.clone(); // name = dest_path as requested
 
-    let initial_value = read_input("Enter initial value: ")?;
+    let initial_content = read_input("Enter initial message content: ")?;
+    let initial_value = Message {
+        content: initial_content,
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs(),
+    };
 
     // Parse the IP address (supports both IPv4 and IPv6)
     let address: IpAddr = if let Some(host) = cli.host {
@@ -71,7 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🚀 Creating relay...");
 
     // Create relay
-    let mut relay = Relay::<String>::new(
+    let mut relay = Relay::<Message>::new(
         name.clone(),
         dest_path.clone(),
         initial_value,
