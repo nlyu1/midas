@@ -1,20 +1,20 @@
 pub mod constants;
-// mod core;
+mod core;
 pub mod metaserver;
-// mod ping;
+pub mod ping;
 // mod pywrappers;
 pub mod rawstream;
-// mod relay;
+mod relay;
+pub use relay::Relay;
 pub mod utils;
 pub use utils::ConnectionHandle;
 
 pub mod gateway;
 
-// // Re-export core types at the top level for easy access
-// pub use core::common::{Agorable, AgorableOption};
-// pub use core::publisher::Publisher;
-// pub use core::subscriber::{OmniSubscriber, Subscriber};
-// pub use relay::Relay;
+// Re-export core types at the top level for easy access
+pub use core::publisher::Publisher;
+pub use core::subscriber::{OmniSubscriber, Subscriber};
+pub use core::{Agorable, AgorableOption};
 
 // use pyo3::prelude::*;
 

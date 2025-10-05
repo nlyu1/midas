@@ -2,7 +2,6 @@ use crate::ConnectionHandle;
 use crate::utils::OrError;
 use futures_util::{SinkExt, StreamExt};
 use local_ip_address::local_ip;
-use std::path::PathBuf;
 use tokio::net::{TcpListener, UnixStream};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
@@ -57,15 +56,22 @@ impl Gateway {
 
 async fn handle_connection(tcp_stream: tokio::net::TcpStream) -> OrError<()> {
     let mut agora_path = String::new();
+    let mut service_type = String::new();
 
     // Accept WebSocket with custom header callback to extract path
     let ws_stream = accept_hdr_async(tcp_stream, |req: &Request, response: Response| {
         let path = req.uri().path();
-        // Path parsing: {addr}:{port}/rawstream/{path} gets mapped to /tmp/agora/{path}/rawstream.sock
+        // Path parsing:
+        // /rawstream/{path} → /tmp/agora/{path}/rawstream.sock
+        // /ping/{path} → /tmp/agora/{path}/ping.sock
 
-        // Expected format: /rawstream/{path}
         if let Some(stripped) = path.strip_prefix("/rawstream/") {
             agora_path = stripped.to_string();
+            service_type = "rawstream".to_string();
+            Ok(response)
+        } else if let Some(stripped) = path.strip_prefix("/ping/") {
+            agora_path = stripped.to_string();
+            service_type = "ping".to_string();
             Ok(response)
         } else {
             eprintln!("Gateway: invalid path format: {}", path);
@@ -78,15 +84,15 @@ async fn handle_connection(tcp_stream: tokio::net::TcpStream) -> OrError<()> {
     .await
     .map_err(|e| format!("WebSocket upgrade failed: {}", e))?;
 
-    if agora_path.is_empty() {
+    if agora_path.is_empty() || service_type.is_empty() {
         return Err("Failed to extract path from request".to_string());
     }
 
-    // Connect to UDS at /tmp/agora/{path}/rawstream.sock
-    let uds_path = PathBuf::from(format!("/tmp/agora/{}/rawstream.sock", agora_path));
+    // Connect to UDS at /tmp/agora/{path}/{service}.sock
+    let uds_path = format!("/tmp/agora/{}/{}.sock", agora_path, service_type);
     let unix_stream = UnixStream::connect(&uds_path)
         .await
-        .map_err(|e| format!("Failed to connect to UDS {}: {}", uds_path.display(), e))?;
+        .map_err(|e| format!("Failed to connect to UDS {}: {}", uds_path, e))?;
 
     // Upgrade UDS connection to WebSocket
     let (uds_ws_stream, _) = client_async("ws://localhost/", unix_stream)

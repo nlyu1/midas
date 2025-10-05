@@ -1,17 +1,25 @@
-use agora::Relay;
-use agora::constants::METASERVER_PORT;
+use agora::constants::{GATEWAY_PORT, METASERVER_PORT};
+use agora::{ConnectionHandle, Relay};
 use clap::Parser;
 use indoc::indoc;
+use local_ip_address::local_ip;
 use std::io::{self, Write};
-use std::net::Ipv6Addr;
+use std::net::IpAddr;
 use tokio;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    /// Port for the metaserver
+    /// Port for the destination metaserver
     #[arg(short, long, default_value_t = METASERVER_PORT)]
     port: u16,
+
+    #[arg(long, help = "Metaserver host IP address (defaults to local IP)")]
+    host: Option<String>,
+
+    /// Port for the local gateway
+    #[arg(long, default_value_t = GATEWAY_PORT)]
+    gateway_port: u16,
 }
 
 fn read_input(prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
@@ -33,7 +41,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             This example demonstrates relaying messages between Agora paths.
         "}
     );
-    println!("Make sure the metaserver is running on port {}!\n", cli.port);
+    println!(
+        "Make sure the metaserver is running on port {}!\n",
+        cli.port
+    );
 
     // Setup relay configuration
     println!("📡 Setting up relay destination:");
@@ -43,15 +54,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let initial_value = read_input("Enter initial value: ")?;
 
-    let metaserver_addr = Ipv6Addr::LOCALHOST; // Assume default address
-
-    let metaserver_port_str =
-        read_input(&format!("Enter metaserver port (default: {}): ", cli.port))?;
-    let metaserver_port = if metaserver_port_str.is_empty() {
-        cli.port
+    // Parse the IP address (supports both IPv4 and IPv6)
+    let address: IpAddr = if let Some(host) = cli.host {
+        host.parse()
+            .map_err(|_| format!("Invalid IP address: {}", host))?
     } else {
-        metaserver_port_str.parse()?
+        local_ip().map_err(|e| format!("Failed to get local IP: {}", e))?
     };
+
+    let dest_metaserver_connection = ConnectionHandle::new(address, cli.port);
+    println!(
+        "Attempting metaserver connection: {}",
+        dest_metaserver_connection
+    );
 
     println!("🚀 Creating relay...");
 
@@ -60,8 +75,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         name.clone(),
         dest_path.clone(),
         initial_value,
-        metaserver_addr,
-        metaserver_port,
+        dest_metaserver_connection,
+        cli.gateway_port,
     )
     .await
     .map_err(|e| format!("Failed to create relay: {}", e))?;
@@ -101,7 +116,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        let src_metaserver_addr = Ipv6Addr::LOCALHOST; // Assume default address
+        // Get source metaserver configuration
+        let src_host = match read_input("Enter source metaserver host (press Enter for local IP): ")
+        {
+            Ok(host) => {
+                if host.is_empty() {
+                    local_ip().map_err(|e| format!("Failed to get local IP: {}", e))?
+                } else {
+                    host.parse()
+                        .map_err(|_| format!("Invalid IP address: {}", host))?
+                }
+            }
+            Err(e) => {
+                eprintln!("❌ Error reading input: {}", e);
+                continue;
+            }
+        };
 
         let src_metaserver_port = match read_input(&format!(
             "Enter source metaserver port (default: {}): ",
@@ -123,11 +153,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(_) => cli.port,
         };
 
+        let src_metaserver_connection = ConnectionHandle::new(src_host, src_metaserver_port);
         println!("🔄 Swapping to source: '{}' -> '{}'", src_path, dest_path);
+        println!("📡 Source metaserver: {}", src_metaserver_connection);
 
         // Perform swapon
         match relay
-            .swapon(src_path.clone(), src_metaserver_addr, src_metaserver_port)
+            .swapon(src_path.clone(), src_metaserver_connection)
             .await
         {
             Ok(()) => {

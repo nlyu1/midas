@@ -1,5 +1,5 @@
 mod server;
-pub use server::{AgoraMetaServer, ServerState};
+pub use server::AgoraMetaServer;
 
 mod publisher_info;
 pub use publisher_info::PublisherInfo;
@@ -9,3 +9,6 @@ pub use client::AgoraClient;
 
 mod protocol;
 pub use protocol::AgoraMeta;
+
+mod state;
+pub use state::ServerState;

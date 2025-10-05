@@ -1,37 +1,70 @@
-use super::common::PingRpcClient;
+use super::PingResponse;
 use crate::utils::OrError;
+use crate::ConnectionHandle;
 use chrono::TimeDelta;
-use std::net::Ipv6Addr;
-use tarpc::{client, context, tokio_serde::formats::Json};
+use futures_util::stream::{SplitSink, SplitStream};
+use futures_util::{SinkExt, StreamExt};
+use std::fmt;
+use tokio::net::TcpStream;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+
+type WsSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
+type WsStream = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
 pub struct PingClient {
-    client: PingRpcClient,
+    ws_write: WsSink,
+    ws_read: WsStream,
 }
 
-impl std::fmt::Debug for PingClient {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PingClient")
-            .field("client", &"PingRpcClient { ... }")
-            .finish()
+impl fmt::Debug for PingClient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PingClient").finish()
     }
 }
 
 impl PingClient {
-    pub async fn new(address: Ipv6Addr, port: u16) -> anyhow::Result<Self> {
-        let server_addr = (address, port);
-        let mut transport = tarpc::serde_transport::tcp::connect(server_addr, Json::default);
-        transport.config_mut().max_frame_length(usize::MAX);
-        let client = PingRpcClient::new(client::Config::default(), transport.await?).spawn();
-        Ok(Self { client })
+    pub async fn new(
+        agora_path: &str,
+        gateway_connection: ConnectionHandle,
+    ) -> OrError<Self> {
+        let url = format!(
+            "ws://{}/ping/{}",
+            gateway_connection,
+            agora_path
+        );
+
+        let (ws_stream, _) = connect_async(&url)
+            .await
+            .map_err(|e| format!("Agora PingClient creation error: failed to connect to {}: {}", url, e))?;
+        let (ws_write, ws_read) = ws_stream.split();
+
+        Ok(Self { ws_write, ws_read })
     }
 
-    pub async fn ping(&self) -> OrError<(Vec<u8>, String, TimeDelta)> {
-        let (vec, s, transmit_time) = self
-            .client
-            .ping_latest_value(context::current())
+    pub async fn ping(&mut self) -> OrError<(Vec<u8>, String, TimeDelta)> {
+        // Send ping request
+        self.ws_write
+            .send(Message::Text("ping".to_string().into()))
             .await
-            .map_err(|e| format!("Ping Rpc client error: {}", e))?;
-        let time_delta = chrono::Utc::now().signed_duration_since(transmit_time);
-        Ok((vec, s, time_delta))
+            .map_err(|e| format!("Failed to send ping: {}", e))?;
+
+        // Wait for response
+        if let Some(msg) = self.ws_read.next().await {
+            match msg {
+                Ok(Message::Text(json)) => {
+                    let response: PingResponse = serde_json::from_str(&json)
+                        .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+                    let time_delta = chrono::Utc::now().signed_duration_since(response.timestamp);
+
+                    Ok((response.vec_payload, response.str_payload, time_delta))
+                }
+                Ok(_) => Err("Unexpected message type".to_string()),
+                Err(e) => Err(format!("WebSocket error: {}", e)),
+            }
+        } else {
+            Err("Connection closed".to_string())
+        }
     }
 }

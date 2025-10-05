@@ -1,7 +1,6 @@
-use crate::utils::OrError;
+use crate::utils::{ConnectionHandle, OrError};
 use crate::{Agorable, Publisher, Subscriber};
 use futures_util::StreamExt;
-use std::net::Ipv6Addr;
 
 pub struct Relay<T: Agorable> {
     stream_out: tokio::task::JoinHandle<()>,
@@ -16,15 +15,15 @@ impl<T: Agorable> Relay<T> {
         name: String,
         dest_path: String,
         initial_value: T,
-        metaserver_addr: Ipv6Addr,
-        metaserver_port: u16,
+        dest_metaserver_connection: ConnectionHandle,
+        local_gateway_port: u16,
     ) -> OrError<Self> {
         let mut publisher = Publisher::new(
             name,
             dest_path.clone(),
             initial_value,
-            metaserver_addr,
-            metaserver_port,
+            dest_metaserver_connection,
+            local_gateway_port,
         )
         .await?;
 
@@ -55,11 +54,10 @@ impl<T: Agorable> Relay<T> {
     pub async fn swapon(
         &mut self,
         src_path: String,
-        metaserver_addr: Ipv6Addr,
-        metaserver_port: u16,
+        src_metaserver_connection: ConnectionHandle,
     ) -> OrError<()> {
         let mut src_subscriber =
-            Subscriber::<T>::new(src_path.clone(), metaserver_addr, metaserver_port).await?;
+            Subscriber::<T>::new(src_path.clone(), src_metaserver_connection).await?;
         let (value, mut stream) = src_subscriber.get_stream().await?;
         if let Some(stream_in) = &self.stream_in {
             stream_in.abort();

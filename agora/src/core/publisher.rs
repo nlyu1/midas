@@ -1,11 +1,9 @@
-use super::common::Agorable;
+use super::Agorable;
 use crate::metaserver::AgoraClient;
 use crate::ping::PingServer;
 use crate::rawstream::RawStreamServer;
-use crate::utils::OrError;
+use crate::utils::{ConnectionHandle, OrError, strip_and_verify};
 use std::marker::PhantomData;
-use std::net::Ipv6Addr;
-
 pub struct Publisher<T: Agorable> {
     _metaclient: AgoraClient,
     rawstream_byteserver: RawStreamServer<Vec<u8>>,
@@ -19,50 +17,56 @@ impl<T: Agorable> Publisher<T> {
         name: String,
         path: String,
         initial_value: T,
-        metaserver_addr: Ipv6Addr,
-        metaserver_port: u16,
+        metaserver_connection: ConnectionHandle,
+        local_gateway_port: u16,
     ) -> OrError<Self> {
-        let metaclient = AgoraClient::new(metaserver_addr, metaserver_port).await
-            .map_err(|e| format!(
-                "AgoraPublisher Error: failed to create _metaclient, make sure to spin up metaserver first: {}", e))?;
-        let publisher_info = metaclient.register_publisher(name, path.clone()).await?;
+        let metaclient = AgoraClient::new(metaserver_connection).await.map_err(|e| {
+            format!(
+                "Agora subscriber error: failed to create AgoraClient: {}",
+                e
+            )
+        })?;
+        let publisher_info = metaclient
+            .register_publisher(name, path.clone(), local_gateway_port)
+            .await?;
+        let _local_gateway_connection = publisher_info.connection();
 
+        // Strip and verify path
+        let normalized_path = strip_and_verify(&path)?;
+
+        // Create socket path strings with suffixes for rawstream servers
+        let bytes_socket_path_str = format!("/tmp/agora/{}/bytes/rawstream.sock", normalized_path);
+        let string_socket_path_str = format!("/tmp/agora/{}/string/rawstream.sock", normalized_path);
+
+        // Serialize initial value to both formats
         let (vec_payload, str_payload) = Self::value_to_payloads(&initial_value)?;
 
-        // This immediately spawns background ping server
-        let pingserver = PingServer::new(
-            publisher_info.ping_socket.ip().clone().into(),
-            publisher_info.ping_socket.port(),
-            vec_payload,
-            str_payload,
-        )
-        .map_err(|e| format!("Failed to create ping server: {}", e))?;
-        let rawstream_byteserver = RawStreamServer::new(
-            publisher_info.service_socket.ip().clone(),
-            publisher_info.service_socket.port(),
-            None,
-        )
-        .await
-        .map_err(|e| {
-            format!(
-                "AgoraPublisher Error: failed to create byte rawstream server: {}",
-                e
-            )
-        })?;
-        let rawstream_omniserver = RawStreamServer::new(
-            publisher_info.string_socket.ip().clone(),
-            publisher_info.string_socket.port(),
-            None,
-        )
-        .await
-        .map_err(|e| {
-            format!(
-                "AgoraPublisher Error: failed to create string rawstream server: {}",
-                e
-            )
-        })?;
+        // Create ping server at base path with initial payloads
+        let pingserver = PingServer::new(&normalized_path, vec_payload.clone(), str_payload.clone())
+            .await
+            .map_err(|e| format!("Failed to create ping server: {}", e))?;
 
-        // Next, establish handshake with server by asking server to confirm
+        // Create rawstream server for bytes at {path}/bytes
+        let rawstream_byteserver = RawStreamServer::new(&bytes_socket_path_str, None)
+            .await
+            .map_err(|e| {
+                format!(
+                    "AgoraPublisher Error: failed to create byte rawstream server: {}",
+                    e
+                )
+            })?;
+
+        // Create rawstream server for strings at {path}/string
+        let rawstream_omniserver = RawStreamServer::new(&string_socket_path_str, None)
+            .await
+            .map_err(|e| {
+                format!(
+                    "AgoraPublisher Error: failed to create string rawstream server: {}",
+                    e
+                )
+            })?;
+
+        // Confirm publisher registration with metaserver
         metaclient
             .confirm_publisher(path)
             .await

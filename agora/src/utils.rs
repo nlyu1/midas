@@ -1,5 +1,5 @@
 pub mod utils;
-pub use utils::{ConnectionHandle, OrError};
+pub use utils::{ConnectionHandle, OrError, prepare_socket_path, strip_and_verify};
 
 mod pathtree;
 pub use pathtree::{TreeNode, TreeNodeRef, TreeTrait};

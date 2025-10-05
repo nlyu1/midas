@@ -1,12 +1,12 @@
-use super::common::Agorable;
+use super::Agorable;
+use crate::ConnectionHandle;
 use crate::metaserver::AgoraClient;
 use crate::ping::PingClient;
 use crate::rawstream::RawStreamClient;
-use crate::utils::OrError;
+use crate::utils::{OrError, strip_and_verify};
 use futures_util::StreamExt;
 use futures_util::stream::Stream;
 use std::marker::PhantomData;
-use std::net::Ipv6Addr;
 use std::pin::Pin;
 
 pub struct Subscriber<T: Agorable> {
@@ -17,40 +17,54 @@ pub struct Subscriber<T: Agorable> {
 }
 
 impl<T: Agorable> Subscriber<T> {
-    // It's the user's burden that they're querying paths with the right stuff
+    /// Creates a new typed Subscriber for a given publisher path.
+    ///
+    /// # Path Format
+    /// Accepts slash-separated paths with or without leading slash:
+    /// - `"test/publisher"` or `"/test/publisher"`
+    /// - `"api/v1/data"` or `"/api/v1/data"`
+    /// - `"sensor"` or `"/sensor"`
     pub async fn new(
         path: String,
-        metaserver_addr: Ipv6Addr,
-        metaserver_port: u16,
+        metaserver_connection: ConnectionHandle,
     ) -> OrError<Subscriber<T>> {
-        let metaclient = AgoraClient::new(metaserver_addr, metaserver_port)
-            .await
-            .map_err(|e| format!("Failed to create AgoraClient: {}", e))?;
-        let publisher_info = metaclient.get_publisher_info(path).await?;
-        let rawstreamclient: RawStreamClient<Vec<u8>> = RawStreamClient::new(
-            publisher_info.service_socket.ip().clone(),
-            publisher_info.service_socket.port(),
-            None,
-            None,
-        )
-        .map_err(|e| {
+        let metaclient = AgoraClient::new(metaserver_connection).await.map_err(|e| {
             format!(
-                "Agora subscriber Error: failed to create byte rawstream client {}",
+                "Agora subscriber error: failed to create AgoraClient: {}",
                 e
             )
         })?;
-        let pingclient = PingClient::new(
-            publisher_info.ping_socket.ip().clone(),
-            publisher_info.ping_socket.port(),
-        )
-        .await
-        .map_err(|e| format!("Agora subscriber Error: failed to create ping client {}", e))?;
-        return Ok(Self {
+
+        // Strip and verify path
+        let normalized_path = strip_and_verify(&path)?;
+
+        let publisher_info = metaclient
+            .get_publisher_info(normalized_path.clone())
+            .await?;
+        let host_gateway_connection = publisher_info.connection();
+
+        // Append "/bytes" suffix for binary rawstream
+        let bytes_path_str = format!("{}/bytes", normalized_path);
+
+        let rawstreamclient: RawStreamClient<Vec<u8>> =
+            RawStreamClient::new(host_gateway_connection.clone(), &bytes_path_str, None, None).map_err(
+                |e| {
+                    format!(
+                        "Agora subscriber Error: failed to create byte rawstream client {}",
+                        e
+                    )
+                },
+            )?;
+        let pingclient = PingClient::new(&normalized_path, host_gateway_connection)
+            .await
+            .map_err(|e| format!("Agora subscriber Error: failed to create ping client {}", e))?;
+
+        Ok(Self {
             _metaclient: metaclient,
             rawstreamclient,
             pingclient,
             _phantom: PhantomData,
-        });
+        })
     }
 
     pub async fn get(&mut self) -> OrError<T> {
@@ -88,45 +102,48 @@ pub struct OmniSubscriber {
 }
 
 impl OmniSubscriber {
-    // Same interfaces as above, except that we fix to T=String and use the String rawstream service on constants (string_socket)
+    /// Creates a new OmniSubscriber (String-based) for a given publisher path.
+    ///
+    /// # Path Format
+    /// Accepts slash-separated paths with or without leading slash:
+    /// - `"test/publisher"` or `"/test/publisher"`
+    /// - `"api/v1/data"` or `"/api/v1/data"`
+    /// - `"sensor"` or `"/sensor"`
     pub async fn new(
         path: String,
-        metaserver_addr: Ipv6Addr,
-        metaserver_port: u16,
+        metaserver_connection: ConnectionHandle,
     ) -> OrError<OmniSubscriber> {
-        let _metaclient = AgoraClient::new(metaserver_addr, metaserver_port)
+        let metaclient = AgoraClient::new(metaserver_connection)
             .await
             .map_err(|e| format!("Failed to create AgoraClient: {}", e))?;
-        let publisher_info = _metaclient.get_publisher_info(path).await?;
 
-        // Use string_socket instead of service_socket for String data
-        let rawstreamclient: RawStreamClient<String> = RawStreamClient::new(
-            publisher_info.string_socket.ip().clone(),
-            publisher_info.string_socket.port(),
-            None,
-            None,
-        )
-        .map_err(|e| {
-            format!(
-                "Agora OmniSubscriber Error: failed to create string rawstream client {}",
-                e
-            )
-        })?;
+        // Strip and verify path
+        let normalized_path = strip_and_verify(&path)?;
 
-        let pingclient = PingClient::new(
-            publisher_info.ping_socket.ip().clone(),
-            publisher_info.ping_socket.port(),
-        )
-        .await
-        .map_err(|e| {
-            format!(
-                "Agora OmniSubscriber Error: failed to create ping client {}",
-                e
-            )
-        })?;
+        let publisher_info = metaclient
+            .get_publisher_info(normalized_path.clone())
+            .await?;
+        let host_gateway_connection = publisher_info.connection();
+
+        // Append "/string" suffix for string rawstream
+        let string_path_str = format!("{}/string", normalized_path);
+
+        let rawstreamclient: RawStreamClient<String> =
+            RawStreamClient::new(host_gateway_connection.clone(), &string_path_str, None, None).map_err(
+                |e| {
+                    format!(
+                        "Agora subscriber Error: failed to create string rawstream client {}",
+                        e
+                    )
+                },
+            )?;
+
+        let pingclient = PingClient::new(&normalized_path, host_gateway_connection)
+            .await
+            .map_err(|e| format!("Agora subscriber Error: failed to create ping client {}", e))?;
 
         Ok(Self {
-            _metaclient,
+            _metaclient: metaclient,
             rawstreamclient,
             pingclient,
         })

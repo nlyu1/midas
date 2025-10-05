@@ -2,7 +2,6 @@ use agora::rawstream::RawStreamServer;
 use clap::Parser;
 use indoc::indoc;
 use std::io::{self, Write};
-use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 #[derive(Parser)]
@@ -16,15 +15,9 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let uds_path = PathBuf::from(format!(
-        "/tmp/agora/{}/rawstream.sock",
-        args.directory
-    ));
+    let uds_path = format!("/tmp/agora/{}/rawstream.sock", args.directory);
 
-    println!(
-        "🚀 Starting Raw Stream Server at UDS: {}",
-        uds_path.display()
-    );
+    println!("🚀 Starting Raw Stream Server at UDS: {}", uds_path);
     print!(
         "{}",
         indoc! {"

@@ -1,12 +1,13 @@
-use agora::OmniSubscriber;
 use agora::constants::METASERVER_PORT;
 use agora::metaserver::AgoraClient;
 use agora::utils::TreeTrait;
+use agora::{ConnectionHandle, OmniSubscriber};
 use clap::Parser;
 use futures_util::StreamExt;
 use indoc::indoc;
+use local_ip_address::local_ip;
 use std::io::{self, Write};
-use std::net::Ipv6Addr;
+use std::net::IpAddr;
 use tokio::io::{AsyncReadExt, stdin};
 use tokio::select;
 
@@ -16,21 +17,28 @@ struct Args {
     #[arg(short, long, default_value_t = METASERVER_PORT)]
     port: u16,
 
-    #[arg(short, long, default_value = "::1")]
-    address: Ipv6Addr,
+    #[arg(long, help = "Metaserver host IP address (defaults to local IP)")]
+    host: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    // Try to connect to the server
-    println!(
-        "Connecting to MetaServer at [{}]:{}...",
-        args.address, args.port
-    );
+    // Parse the IP address (supports both IPv4 and IPv6)
+    let address: IpAddr = if let Some(host) = &args.host {
+        host.parse()
+            .map_err(|_| anyhow::anyhow!("Invalid IP address: {}", host))?
+    } else {
+        local_ip().map_err(|e| anyhow::anyhow!("Failed to get local IP: {}", e))?
+    };
 
-    let client = match AgoraClient::new(args.address, args.port).await {
+    // Try to connect to the server
+    println!("Connecting to MetaServer at {}:{}...", address, args.port);
+
+    let metaserver_connection = ConnectionHandle::new(address, args.port);
+
+    let client = match AgoraClient::new(metaserver_connection.clone()).await {
         Ok(client) => {
             println!("✅ Connected successfully!");
             client
@@ -113,7 +121,7 @@ async fn main() -> anyhow::Result<()> {
                     continue;
                 }
                 let path = parts[1];
-                monitor_path(path, args.address, args.port).await;
+                monitor_path(path, metaserver_connection.clone()).await;
             }
             _ => {
                 println!(
@@ -180,7 +188,7 @@ async fn get_publisher_info(client: &AgoraClient, path: &str) {
     }
 }
 
-async fn monitor_path(path: &str, metaserver_addr: Ipv6Addr, metaserver_port: u16) {
+async fn monitor_path(path: &str, metaserver_connection: ConnectionHandle) {
     println!(
         "🔍 Starting to monitor path '{}' - Press Ctrl+D to exit",
         path
@@ -188,7 +196,7 @@ async fn monitor_path(path: &str, metaserver_addr: Ipv6Addr, metaserver_port: u1
 
     // Create omnisubscriber
     let mut omni_subscriber =
-        match OmniSubscriber::new(path.to_string(), metaserver_addr, metaserver_port).await {
+        match OmniSubscriber::new(path.to_string(), metaserver_connection).await {
             Ok(subscriber) => subscriber,
             Err(e) => {
                 println!(

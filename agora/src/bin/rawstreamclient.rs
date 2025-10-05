@@ -4,8 +4,8 @@ use agora::ConnectionHandle;
 use clap::Parser;
 use futures_util::StreamExt;
 use indoc::indoc;
+use local_ip_address::local_ip;
 use std::net::IpAddr;
-use std::path::Path;
 
 #[derive(Parser)]
 #[command(version, about = "Raw Stream Client - connects to WebSocket server via gateway", long_about = None)]
@@ -13,8 +13,8 @@ struct Args {
     #[arg(short, long, default_value_t = GATEWAY_PORT)]
     port: u16,
 
-    #[arg(long, default_value = "::1")]
-    host: String,
+    #[arg(long, help = "Gateway host IP address (defaults to local IP)")]
+    host: Option<String>,
 
     #[arg(long, default_value = "test/publisher", help = "Directory path (maps to /tmp/agora/{directory}/rawstream.sock)")]
     directory: String,
@@ -25,13 +25,14 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // Parse the IP address (supports both IPv4 and IPv6)
-    let address: IpAddr = args
-        .host
-        .parse()
-        .map_err(|_| anyhow::anyhow!("Invalid IP address: {}", args.host))?;
+    let address: IpAddr = if let Some(host) = args.host {
+        host.parse()
+            .map_err(|_| anyhow::anyhow!("Invalid IP address: {}", host))?
+    } else {
+        local_ip().map_err(|e| anyhow::anyhow!("Failed to get local IP: {}", e))?
+    };
 
     let gateway = ConnectionHandle::new(address, args.port);
-    let directory_path = Path::new(&args.directory);
 
     println!(
         "🔗 Connecting to Raw Stream via gateway at {}/rawstream/{}",
@@ -41,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Create client with String type
     let client: RawStreamClient<String> =
-        match RawStreamClient::new(gateway, directory_path, None, None) {
+        match RawStreamClient::new(gateway, &args.directory, None, None) {
             Ok(client) => {
                 println!("✅ Connected successfully!");
                 client

@@ -24,7 +24,9 @@ async fn main() -> anyhow::Result<()> {
         gateway.connection().addr(),
         gateway.connection().port()
     );
-    println!("📡 Ready to proxy connections to /tmp/agora/*/rawstream.sock");
+    println!("📡 Ready to proxy connections:");
+    println!("   - /rawstream/{{path}} → /tmp/agora/{{path}}/rawstream.sock");
+    println!("   - /ping/{{path}} → /tmp/agora/{{path}}/ping.sock");
     println!("Press Ctrl+C to exit\n");
 
     // Keep running indefinitely (drop on Ctrl+C)

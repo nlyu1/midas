@@ -1,5 +1,14 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PingResponse {
+    pub vec_payload: Vec<u8>,
+    pub str_payload: String,
+    pub timestamp: DateTime<Utc>,
+}
+
 mod client;
-mod common;
 mod server;
 
 pub use client::PingClient;

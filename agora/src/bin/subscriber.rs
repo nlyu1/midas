@@ -1,12 +1,25 @@
 use agora::constants::METASERVER_PORT;
-use agora::{Agorable, Subscriber};
+use agora::{Agorable, Subscriber, ConnectionHandle};
+use clap::Parser;
 use futures_util::StreamExt;
 use indoc::indoc;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::io::{self, Write};
-use std::net::Ipv6Addr;
+use std::net::IpAddr;
 use tokio;
+use local_ip_address::local_ip;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// Port for the metaserver
+    #[arg(short, long, default_value_t = METASERVER_PORT)]
+    port: u16,
+
+    #[arg(long, help = "Metaserver host IP address (defaults to local IP)")]
+    host: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Message {
@@ -24,6 +37,8 @@ impl Agorable for Message {}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = Cli::parse();
+
     print!(
         "{}",
         indoc! {"
@@ -33,7 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!(
         "Make sure the metaserver is running on port {}!\n",
-        METASERVER_PORT
+        cli.port
     );
 
     // Get subscriber configuration from user
@@ -45,9 +60,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("🔌 Connecting to metaserver and creating subscriber...");
 
+    // Parse the IP address (supports both IPv4 and IPv6)
+    let address: IpAddr = if let Some(host) = cli.host {
+        host.parse()
+            .map_err(|_| format!("Invalid IP address: {}", host))?
+    } else {
+        local_ip().map_err(|e| format!("Failed to get local IP: {}", e))?
+    };
+
+    let metaserver_connection = ConnectionHandle::new(address, cli.port);
+
     // Create subscriber
     let mut subscriber =
-        Subscriber::<Message>::new(path.clone(), Ipv6Addr::LOCALHOST, METASERVER_PORT)
+        Subscriber::<Message>::new(path.clone(), metaserver_connection)
             .await
             .map_err(|e| format!("Failed to create subscriber: {}", e))?;
 

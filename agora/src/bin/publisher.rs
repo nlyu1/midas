@@ -1,11 +1,12 @@
-use agora::constants::METASERVER_PORT;
-use agora::{Agorable, Publisher};
+use agora::constants::{GATEWAY_PORT, METASERVER_PORT};
+use agora::{Agorable, ConnectionHandle, Publisher};
 use clap::Parser;
 use indoc::indoc;
+use local_ip_address::local_ip;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::io::{self, Write};
-use std::net::Ipv6Addr;
+use std::net::IpAddr;
 use tokio;
 
 #[derive(Parser, Debug)]
@@ -15,8 +16,12 @@ struct Cli {
     #[arg(short, long, default_value_t = METASERVER_PORT)]
     port: u16,
 
-    #[arg(short, long, default_value = "::1")]
-    address: Ipv6Addr,
+    #[arg(long, help = "Metaserver host IP address (defaults to local IP)")]
+    host: Option<String>,
+
+    /// Port for the local gateway
+    #[arg(long, default_value_t = GATEWAY_PORT)]
+    gateway_port: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,13 +82,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("📡 Connecting to metaserver and creating publisher...");
 
+    // Parse the IP address (supports both IPv4 and IPv6)
+    let address: IpAddr = if let Some(host) = cli.host {
+        host.parse()
+            .map_err(|_| format!("Invalid IP address: {}", host))?
+    } else {
+        local_ip().map_err(|e| format!("Failed to get local IP: {}", e))?
+    };
+
+    let metaserver_connection = ConnectionHandle::new(address, cli.port);
+    println!(
+        "Attempting metaserver connection: {}",
+        metaserver_connection
+    );
+
     // Create publisher
     let mut publisher = Publisher::new(
         name.clone(),
         path.clone(),
         initial_message,
-        cli.address,
-        cli.port,
+        metaserver_connection,
+        cli.gateway_port,
     )
     .await
     .map_err(|e| format!("Failed to create publisher: {}", e))?;
