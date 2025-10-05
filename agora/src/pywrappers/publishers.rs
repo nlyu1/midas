@@ -1,6 +1,6 @@
 use crate::Publisher;
-use crate::utils::parse_ipv6_str;
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use crate::pywrappers::connection_handle::PyConnectionHandle;
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use tokio::runtime::Runtime;
 
@@ -19,12 +19,9 @@ macro_rules! create_typed_publisher {
                 name: String,
                 path: String,
                 initial_value: $type,
-                metaserver_addr: String,
-                metaserver_port: u16,
+                metaserver_connection: PyConnectionHandle,
+                local_gateway_port: u16,
             ) -> PyResult<Self> {
-                let metaserver_addr =
-                    parse_ipv6_str(metaserver_addr).map_err(|e| PyValueError::new_err(e))?;
-
                 // Create runtime that will be kept for the lifetime of this object
                 let rt = tokio::runtime::Runtime::new().map_err(|e| {
                     PyRuntimeError::new_err(format!("Failed to create tokio runtime: {}", e))
@@ -35,8 +32,8 @@ macro_rules! create_typed_publisher {
                         name,
                         path,
                         initial_value,
-                        metaserver_addr,
-                        metaserver_port,
+                        metaserver_connection.to_connection_handle(),
+                        local_gateway_port,
                     ))
                     .map_err(|e| PyRuntimeError::new_err(e))?;
 

@@ -1,8 +1,9 @@
 use super::async_helpers::PyResultIterator;
 use crate::create_py_result_iterator;
-use crate::utils::{BlockingStreamIterator, OrError, parse_ipv6_str, stream_to_iter};
+use crate::pywrappers::connection_handle::PyConnectionHandle;
+use crate::utils::{BlockingStreamIterator, OrError, stream_to_iter};
 use crate::{OmniSubscriber, Subscriber};
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use tokio::runtime::Runtime;
 
@@ -20,18 +21,17 @@ macro_rules! create_typed_subscriber {
         #[pymethods]
         impl $name {
             #[new]
-            fn new(path: String, metaserver_addr: String, metaserver_port: u16) -> PyResult<Self> {
-                // convert metaserver_addr from string and parse to Ipv6Addr
-                let parsed_addr =
-                    parse_ipv6_str(metaserver_addr).map_err(|e| PyValueError::new_err(e))?;
-
+            fn new(path: String, metaserver_connection: PyConnectionHandle) -> PyResult<Self> {
                 // Create runtime that will be kept for the lifetime of this object
                 let rt = tokio::runtime::Runtime::new().map_err(|e| {
                     PyRuntimeError::new_err(format!("Failed to create tokio runtime: {}", e))
                 })?;
 
                 let inner = rt
-                    .block_on(Subscriber::new(path, parsed_addr, metaserver_port))
+                    .block_on(Subscriber::new(
+                        path,
+                        metaserver_connection.to_connection_handle(),
+                    ))
                     .map_err(|e| PyRuntimeError::new_err(e))?;
 
                 Ok(Self { inner, rt })
@@ -77,17 +77,17 @@ pub struct PyOmniSubscriber {
 #[pymethods]
 impl PyOmniSubscriber {
     #[new]
-    fn new(path: String, metaserver_addr: String, metaserver_port: u16) -> PyResult<Self> {
-        // convert metaserver_addr from string and parse to Ipv6Addr
-        let parsed_addr = parse_ipv6_str(metaserver_addr).map_err(|e| PyValueError::new_err(e))?;
-
+    fn new(path: String, metaserver_connection: PyConnectionHandle) -> PyResult<Self> {
         // Create runtime that will be kept for the lifetime of this object
         let rt = tokio::runtime::Runtime::new().map_err(|e| {
             PyRuntimeError::new_err(format!("Failed to create tokio runtime: {}", e))
         })?;
 
         let inner = rt
-            .block_on(OmniSubscriber::new(path, parsed_addr, metaserver_port))
+            .block_on(OmniSubscriber::new(
+                path,
+                metaserver_connection.to_connection_handle(),
+            ))
             .map_err(|e| PyRuntimeError::new_err(e))?;
 
         Ok(Self { inner, rt })

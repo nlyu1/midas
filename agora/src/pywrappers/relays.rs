@@ -1,6 +1,6 @@
 use crate::Relay;
-use crate::utils::parse_ipv6_str;
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use crate::pywrappers::connection_handle::PyConnectionHandle;
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use tokio::runtime::Runtime;
 
@@ -19,12 +19,9 @@ macro_rules! create_typed_relay {
                 name: String,
                 dest_path: String,
                 initial_value: $type,
-                metaserver_addr: String,
-                metaserver_port: u16,
+                dest_metaserver_connection: PyConnectionHandle,
+                local_gateway_port: u16,
             ) -> PyResult<Self> {
-                let metaserver_addr =
-                    parse_ipv6_str(metaserver_addr).map_err(|e| PyValueError::new_err(e))?;
-
                 // Create runtime that will be kept for the lifetime of this object
                 let rt = tokio::runtime::Runtime::new().map_err(|e| {
                     PyRuntimeError::new_err(format!("Failed to create tokio runtime: {}", e))
@@ -35,8 +32,8 @@ macro_rules! create_typed_relay {
                         name,
                         dest_path,
                         initial_value,
-                        metaserver_addr,
-                        metaserver_port,
+                        dest_metaserver_connection.to_connection_handle(),
+                        local_gateway_port,
                     ))
                     .map_err(|e| PyRuntimeError::new_err(e))?;
 
@@ -46,17 +43,13 @@ macro_rules! create_typed_relay {
             fn swapon(
                 &mut self,
                 src_path: String,
-                metaserver_addr: String,
-                metaserver_port: u16,
+                src_metaserver_connection: PyConnectionHandle,
             ) -> PyResult<()> {
-                let metaserver_addr =
-                    parse_ipv6_str(metaserver_addr).map_err(|e| PyValueError::new_err(e))?;
-
                 Ok(self
                     .rt
                     .block_on(
                         self.inner
-                            .swapon(src_path, metaserver_addr, metaserver_port),
+                            .swapon(src_path, src_metaserver_connection.to_connection_handle()),
                     )
                     .map_err(|e| PyRuntimeError::new_err(e))?)
             }
