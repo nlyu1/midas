@@ -1,6 +1,6 @@
-# Agora: IPv6-based Publisher-Subscriber System
+# Agora: Publisher-Subscriber System
 
-Agora is a distributed publisher-subscriber messaging system built on IPv6 with path-based service discovery. It enables real-time streaming communication between publishers and subscribers using statically typed messages, with support for both Rust and Python applications.
+Agora is a distributed publisher-subscriber messaging system built with path-based service discovery. It enables real-time streaming communication between publishers and subscribers using statically typed messages, supporting **network coordination between Unix nodes** for **both Rust and Python** applications.
 
 ## Core Concepts
 
@@ -15,9 +15,9 @@ Agora is a distributed publisher-subscriber messaging system built on IPv6 with 
 
 **Agorable**: Trait for types that can be published/subscribed. Built-in support for `String`, `i64`, `bool`, `f64`, `f32`.
 
-**Relay\<T>**: Dynamic publisher that relays typed messages from switchable source paths to a fixed destination. Enables contiguous streams from discontinuous sources and cross-metaserver bridging via `swapon()`.
+**MetaServer**: Central registry that manages publisher discovery and IPv6 address allocation. 
 
-**MetaServer**: Central registry that manages publisher discovery and IPv6 address allocation.
+**Relay\<T>**: Dynamic publisher that relays typed messages from switchable source paths to a fixed destination. Enables contiguous streams from discontinuous sources and cross-metaserver bridging via `swapon()`.
 
 ## Quick Start
 
@@ -26,66 +26,26 @@ Agora is a distributed publisher-subscriber messaging system built on IPv6 with 
    cargo build
    ```
 
-2. **Setup IPv6 networking** (Ubuntu):
-   ```bash
-   sudo ./setup/persistent_ipv6_setup.sh
-   ```
-
-3. **Start the MetaServer**:
+2. **Start the MetaServer on main node**: 
    ```bash
    cargo run --bin metaserver
+   # Metaserver started on 192.168.0.75:8080
    ```
 
-4. **Explore with MetaClient**:
+3. **Start gateway on each node** (including main): 
    ```bash
-   cargo run --bin metaclient
+   cargo run --bin gateway
+   # Agora Gateway listening on 192.168.0.75:8081
    ```
 
-## Examples
-
-The following example demonstrates the basic workflow: 
-### 1. Start MetaServer
-```bash
-cargo run --bin metaserver
-# Listening on port 8080
-```
-
-### 2. Create a Publisher
-```bash
-cargo run --bin publisher_example
-# Enter publisher name: my_publisher
-# Enter path: chat/general
-# Enter initial message: Hello, world!
-```
-
-### 3. Subscribe to Messages
-In another terminal:
-```bash
-cargo run --bin subscriber_example
-# Enter path to subscribe to: chat/general
-```
-
-### 4. Monitor with MetaClient
-```bash
-cargo run --bin metaclient
-# Use 'print' to see active publishers
-# Use 'monitor <path>' to watch messages
-# Use 'info <path>' for publisher details
-```
-
-**Available MetaClient commands:**
-- `print` - Show current path tree
-- `info <path>` - Get publisher information
-- `monitor <path>` - Watch live messages (Ctrl+D to exit)
-- `remove <path>` - Remove a publisher
-- `help` - Show command help
-- `quit` - Exit
+4. **Explore with MetaClient on any node** (addr=localhost, port=8080) if not passed:
+   ```bash
+   cargo run --bin metaclient -- --host 192.168.0.75
+   ```
 
 ## Python Integration
 
 Agora provides Python bindings through PyO3 and Maturin, supporting typed publishers and subscribers.
-
-**Setup:**
 1. Install maturin in your Python environment:
    ```bash
    pip install maturin
@@ -93,64 +53,66 @@ Agora provides Python bindings through PyO3 and Maturin, supporting typed publis
 
 2. Build and install the Python package:
    ```bash
-   # Development build (faster, includes debug info)
-   maturin develop
-
-   # Release build (optimized)
    maturin develop --release
    ```
 
-**Available Python types:**
-- **Publishers**: `PyStringPublisher`, `PyI64Publisher`, `PyBoolPublisher`, `PyF64Publisher`, `PyF32Publisher`
-- **Subscribers**: `PyStringSubscriber`, `PyI64Subscriber`, `PyBoolSubscriber`, `PyF64Subscriber`, `PyF32Subscriber`, `PyOmniSubscriber`
-- **Relays**: `PyStringRelay`, `PyI64Relay`, `PyBoolRelay`, `PyF64Relay`, `PyF32Relay`
+## Examples
 
-Each relay is initialized with `new(name, dest_path, initial_value, metaserver_addr, metaserver_port)` and supports dynamic source switching via `swapon(src_path, metaserver_addr, metaserver_port)`.
-
-**TODO: add python examples later**
-
-Start an agora server by `cargo run --bin metaserver -- -p 8080`. 
-
-## Network Setup (Ubuntu)
-
-Agora uses IPv6 Unique Local Addresses (ULA) for scalable addressing and service isolation. The MetaServer automatically allocates IPv6 addresses from the `fde5:402f:ab0a:1:<uid>::/80` subnet for each publisher, where `<uid>` is the MetaServer's port number.
-
-### Automatic Setup
-Run the provided script for persistent configuration:
-```bash
-sudo ./setup/persistent_ipv6_setup.sh
+The following example demonstrates the basic workflow. 
+```bash 
+# Main node: provide metaserver port (default 8080)
+cargo run --bin metaserver 
+# Metaserver started on 192.168.0.75:8080
+```
+### Publish messages
+Run on any node with connection to main (can be main): 
+1. **Start gateway process**. Only the publisher needs to start gateway. 
+```bash 
+# Replace with main node IP
+cargo run --bin gateway
+# Gateway running at 192.168.0.69:8081
+```
+2. **Run example publisher**
+```bash 
+cargo run --bin publisher -- --host 192.168.0.75
 ```
 
-This script:
-- Enables `net.ipv6.ip_nonlocal_bind=1` for flexible address binding
-- Configures the ULA subnet via netplan
-- Sets up local routing for the address range
+### Subscribe to messages
+Run on any machine with publisher & main node connection: subscriber **don't need to know publisher gateway port**! 
+```bash
+# Provide metaserver IP (default localhost) and port (default 8080) 
+cargo run --bin subscriber -- --host 192.168.0.75
+```
 
-### Manual Setup
-If you prefer manual configuration:
+### Monitor with MetaClient
+```bash
+# Provide metaserver IP (default localhost) and port (default 8080)
+cargo run --bin metaclient -- --host 192.168.0.75
+# Use 'print' to see active publishers
+# Use 'monitor <path>' to watch messages
+# Use 'info <path>' for publisher details
+```
 
-1. **Enable non-local IPv6 binding:**
-   ```bash
-   sudo sysctl -w net.ipv6.ip_nonlocal_bind=1
-   echo 'net.ipv6.ip_nonlocal_bind = 1' | sudo tee -a /etc/sysctl.conf
-   ```
+### Relay (advanced)
 
-2. **Find your network interface:**
-   ```bash
-   ip link show
-   # Look for your WiFi / ethernet interface (typically wlp7s0, wlp3s0, etc.)
-   ```
+Relays provide dynamic data routing across agora paths and metaservers. Use-cases include: 
 
-3. **Configure the ULA subnet:**
-   ```bash
-   # Replace wlp7s0 with your interface name
-   sudo ip -6 addr add fde5:402f:ab0a:1::3/64 dev wlp7s0
-   ```
+1. Hot-swapping metaserver without restarting existing publishers. 
+2. Combining data streams. 
 
-### Address Allocation
-- **MetaServer**: `[::1]:8080` (localhost)
-- **Publishers**: `fde5:402f:ab0a:1:<uid>:<suffix>:PORT` where `<uid>` is the MetaServer port and `<suffix>` is a random 48-bit identifier
-- **Port scheme**: 8081 (service), 8082 (omnistring), 8083 (ping)
+Run on the main node: 
+```bash
+cargo run --bin metaserver # Metaserver active on 192.168.0.75:8080
+# Separate terminal: 
+cargo run --bin gateway # Agora Gateway listening on 192.168.0.75:8081
+# Separate terminal: create `src0_node0` publisher by answering `src0_node0` to all three prompts
+cargo run --bin publisher 
+# Separate terminal: create `src1_node0` publisher by answering `src0_node0` to all three prompts
+cargo run --bin publisher 
+```
+
+```bash
+```
 
 ## Architecture
 

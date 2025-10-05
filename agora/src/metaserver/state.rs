@@ -91,7 +91,6 @@ impl ServerState {
 
         // Extract address and port from stored info
         let publisher_info = self.publishers.get(&path).unwrap();
-        println!("Creating pingclient. Trying to ping...{}\n", path);
 
         let mut pingclient = PingClient::new(&path, publisher_info.connection())
             .await
@@ -103,7 +102,7 @@ impl ServerState {
                 );
                 format!(
                     "Publisher confirmation failed: metaserver failed to create ping client! \
-                     You might have forgotten to run network setup: {}",
+                     Are you running the gateway?: {}",
                     e
                 )
             })?;

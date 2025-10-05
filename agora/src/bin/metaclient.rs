@@ -33,18 +33,18 @@ async fn main() -> anyhow::Result<()> {
         local_ip().map_err(|e| anyhow::anyhow!("Failed to get local IP: {}", e))?
     };
 
-    // Try to connect to the server
-    println!("Connecting to MetaServer at {}:{}...", address, args.port);
-
     let metaserver_connection = ConnectionHandle::new(address, args.port);
 
     let client = match AgoraClient::new(metaserver_connection.clone()).await {
         Ok(client) => {
-            println!("✅ Connected successfully!");
+            println!(
+                "Successfully connected to metaserver at {}:{}...",
+                address, args.port
+            );
             client
         }
         Err(e) => {
-            eprintln!("❌ Failed to connect to server: {}", e);
+            eprintln!("❌ Failed to connect to metaserver: {}", e);
             eprintln!("Make sure the MetaServer is running with: cargo run --bin metaserver");
             return Ok(());
         }

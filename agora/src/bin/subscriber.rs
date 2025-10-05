@@ -1,14 +1,14 @@
 use agora::constants::METASERVER_PORT;
-use agora::{Agorable, Subscriber, ConnectionHandle};
+use agora::{Agorable, ConnectionHandle, Subscriber};
 use clap::Parser;
 use futures_util::StreamExt;
 use indoc::indoc;
+use local_ip_address::local_ip;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::io::{self, Write};
 use std::net::IpAddr;
 use tokio;
-use local_ip_address::local_ip;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -71,10 +71,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let metaserver_connection = ConnectionHandle::new(address, cli.port);
 
     // Create subscriber
-    let mut subscriber =
-        Subscriber::<Message>::new(path.clone(), metaserver_connection)
-            .await
-            .map_err(|e| format!("Failed to create subscriber: {}", e))?;
+    let mut subscriber = Subscriber::<Message>::new(path.clone(), metaserver_connection)
+        .await
+        .map_err(|e| format!("Failed to create subscriber: {}", e))?;
 
     println!("✅ Subscriber created successfully for path '{}'", path);
     print!(

@@ -76,7 +76,7 @@ impl AgoraMetaServer {
         // JSON transport is provided by the json_transport tarpc module. It makes it easy
         // to start up a serde-powered json serialization strategy over TCP.
         let mut listener = tarpc::serde_transport::tcp::listen(&server_addr, Json::default).await?;
-        println!("Listening on port {}", listener.local_addr().port());
+        println!("Metaserver active on {}:{}", address, port);
         listener.config_mut().max_frame_length(usize::MAX);
 
         // Start a background process to obtain write lock on shared_state and prunes. Should execute once every constant (see top) number of ms
