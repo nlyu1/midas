@@ -13,7 +13,7 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let gateway = Gateway::new(args.port)
+    let _gateway = Gateway::new(args.port)
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
 
@@ -22,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
     println!("   - /ping/{{path}} → /tmp/agora/{{path}}/ping.sock");
     println!("Press Ctrl+C to exit\n");
 
-    // Keep running indefinitely (drop on Ctrl+C)
+    // Keep gateway alive - drop on Ctrl+C will trigger cleanup
     std::future::pending::<()>().await;
 
     Ok(())

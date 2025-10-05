@@ -38,32 +38,28 @@ impl AgoraClient {
         path: String,
         gateway_port: u16,
     ) -> OrError<PublisherInfo> {
-        // When a publisher is registering publisher, consumers will connect to the gateway on the caller's machine.
         let host_connection = ConnectionHandle::new_local(gateway_port)?;
-        let result = self
+        self
             .client
             .register_publisher(context::current(), name, path, host_connection)
             .await
-            .map_err(|e| format!("RPC error: {}", e))?;
-        result
+            .map_err(|e| format!("RPC error: {}", e))?
     }
 
     pub async fn confirm_publisher(&self, path: String) -> OrError<()> {
-        let result = self
+        self
             .client
             .confirm_publisher(context::current(), path)
             .await
-            .map_err(|e| format!("RPC error: {}", e))?;
-        result
+            .map_err(|e| format!("RPC error: {}", e))?
     }
 
     pub async fn remove_publisher(&self, path: String) -> OrError<PublisherInfo> {
-        let result = self
+        self
             .client
             .remove_publisher(context::current(), path)
             .await
-            .map_err(|e| format!("RPC error: {}", e))?;
-        result
+            .map_err(|e| format!("RPC error: {}", e))?
     }
 
     pub async fn get_path_tree(&self) -> OrError<TreeNodeRef> {
@@ -79,12 +75,11 @@ impl AgoraClient {
     }
 
     pub async fn get_publisher_info(&self, path: String) -> OrError<PublisherInfo> {
-        let result = self
+        self
             .client
             .publisher_info(context::current(), path)
             .await
-            .map_err(|e| format!("RPC error: {}", e))?;
-        result
+            .map_err(|e| format!("RPC error: {}", e))?
     }
 }
 

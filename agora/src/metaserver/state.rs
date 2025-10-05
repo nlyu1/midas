@@ -9,7 +9,13 @@ use std::collections::HashMap;
 pub struct ServerState {
     pub path_tree: TreeNodeRef,
     pub publishers: HashMap<String, PublisherInfo>,
-    pub confirmed_publishers: HashMap<String, PingClient>, // For each client, initialize a ping-client
+    pub confirmed_publishers: HashMap<String, PingClient>,
+}
+
+impl Default for ServerState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ServerState {
@@ -106,14 +112,13 @@ impl ServerState {
                     e
                 )
             })?;
-        let _ = pingclient.ping().await.map_err(|e| {
+        let _ = pingclient.ping().await.inspect_err(|_| {
             let _ = self.remove_publisher(path.clone());
             eprintln!(
                 "Removed registered publisher {} upon unsuccessful confirmation",
                 &path
             );
-            e
-        })?; // Make sure that we can ping and obtain results
+        })?;
 
         // Now that things are ok, add pingclient
         println!("Publisher {} confirmed.", &path);
@@ -265,11 +270,9 @@ impl ServerState {
 
         // Iterate over all confirmed publishers and ping each one
         for path in paths_to_check {
-            if let Some(ping_client) = self.confirmed_publishers.get_mut(&path) {
-                if let Err(_) = ping_client.ping().await {
-                    // Ping failed, mark as stale
-                    stale_paths.push(path.clone());
-                }
+            if let Some(ping_client) = self.confirmed_publishers.get_mut(&path)
+                && let Err(_) = ping_client.ping().await {
+                stale_paths.push(path.clone());
             }
         }
 
