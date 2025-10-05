@@ -1,14 +1,15 @@
 use super::protocol::AgoraMeta;
 use super::publisher_info::PublisherInfo;
-use crate::constants::{PUBLISHER_OMNISTRING_PORT, PUBLISHER_PING_PORT, PUBLISHER_SERVICE_PORT};
-use crate::ping::PingClient;
-use crate::utils::{OrError, PublisherAddressManager, TreeNode, TreeNodeRef, TreeTrait};
+// use crate::ping::PingClient;
+use crate::constants::CHECK_PUBLISHER_LIVELINESS_EVERY_MS;
+use crate::utils::{OrError, TreeNode, TreeNodeRef, TreeTrait};
+use crate::ConnectionHandle; 
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 
-use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
+use std::net::IpAddr;
 use tarpc::context;
 use tarpc::server::incoming::Incoming;
 
@@ -19,27 +20,24 @@ use tarpc::{
 };
 use tokio::time::{Duration, interval};
 
-const CHECK_PUBLISHER_LIVELINESS_EVERY_MS: u64 = 500;
-
 // Shared server state that will be accessed by all connections
 #[derive(Debug)]
 pub struct ServerState {
     pub path_tree: TreeNodeRef,
     pub publishers: HashMap<String, PublisherInfo>,
-    pub confirmed_publishers: HashMap<String, PingClient>, // For each client, initialize a ping-client
-    address_manager: PublisherAddressManager,
+    // pub confirmed_publishers: HashMap<String, PingClient>, // For each client, initialize a ping-client
+    pub confirmed_publishers: HashMap<String, i32>,
 }
 
 // Todo: separate two things for serverState: query new address, and (2) confirm that publisher is running
 // After confirmation, server runs a ping-client. There's also a
 
 impl ServerState {
-    pub fn new(uid: u16) -> Self {
+    pub fn new() -> Self {
         Self {
             path_tree: TreeNode::new("agora"),
             publishers: HashMap::new(),
             confirmed_publishers: HashMap::new(),
-            address_manager: PublisherAddressManager::new(uid),
         }
     }
 
@@ -47,7 +45,12 @@ impl ServerState {
         self.path_tree.clone()
     }
 
-    pub fn register_publisher(&mut self, name: String, path: String) -> OrError<PublisherInfo> {
+    pub fn register_publisher(
+        &mut self,
+        name: String,
+        path: String,
+        host_connection: ConnectionHandle,
+    ) -> OrError<PublisherInfo> {
         // Validate path format strictly
         self.validate_path_format(&path)?;
 
@@ -77,13 +80,8 @@ impl ServerState {
         // Build parent paths as needed
         self.ensure_path_exists(&path)?;
 
-        // Try allocating address for publisher. If succeeded, register
-        let service_address = self.address_manager.allocate_publisher_address()?;
-        let service_socket = SocketAddrV6::new(service_address, PUBLISHER_SERVICE_PORT, 0, 0);
-        let string_socket = SocketAddrV6::new(service_address, PUBLISHER_OMNISTRING_PORT, 0, 0);
-        let ping_socket = SocketAddrV6::new(service_address, PUBLISHER_PING_PORT, 0, 0);
-
-        let publisher_info = PublisherInfo::new(&name, service_socket, string_socket, ping_socket);
+        // The designated uds path of an agora publisher is just its agora path
+        let publisher_info = PublisherInfo::new(&name, host_connection, &path);
         println!(
             "Registered publisher {:?} at path {}",
             publisher_info, &path
@@ -92,63 +90,56 @@ impl ServerState {
         Ok(publisher_info)
     }
 
-    pub async fn confirm_publisher(&mut self, path: String) -> OrError<()> {
-        // Checks that publisher has already been registered
-        if !self.publishers.contains_key(&path) {
-            return Err(format!(
-                "Metaserver confirmation error: \
-                 please register path {} before confirming",
-                path
-            ));
-        }
+    // pub async fn confirm_publisher(&mut self, path: String) -> OrError<()> {
+    //     // Checks that publisher has already been registered
+    //     if !self.publishers.contains_key(&path) {
+    //         return Err(format!(
+    //             "Metaserver confirmation error: \
+    //              please register path {} before confirming",
+    //             path
+    //         ));
+    //     }
 
-        // Checks against duplicate confirmation
-        if self.confirmed_publishers.contains_key(&path) {
-            return Err(format!(
-                "Metaserver confirmation error: \
-                 {} already registered and confirmed",
-                path
-            ));
-        }
+    //     // Checks against duplicate confirmation
+    //     if self.confirmed_publishers.contains_key(&path) {
+    //         return Err(format!(
+    //             "Metaserver confirmation error: \
+    //              {} already registered and confirmed",
+    //             path
+    //         ));
+    //     }
 
-        // Extract address and port from stored info
-        let publisher_info = self.publishers.get(&path).unwrap();
-        let (publisher_address, publisher_port) = publisher_info.ping_socket_addr();
+    //     // Extract address and port from stored info
+    //     let publisher_info = self.publishers.get(&path).unwrap();
 
-        // Initialize a ping client
-        let publisher_ipv6 = match publisher_address {
-            std::net::IpAddr::V6(addr) => addr,
-            std::net::IpAddr::V4(_) => {
-                return Err("IPv4 addresses not supported for ping client".to_string());
-            }
-        };
-        let pingclient = PingClient::new(publisher_ipv6, publisher_port)
-            .await
-            .map_err(|e| {
-                let _ = self.remove_publisher(path.clone());
-                eprintln!(
-                    "Removed registered publisher {} upon unsuccessful confirmation",
-                    &path
-                );
-                format!(
-                    "Publisher confirmation failed: metaserver failed to create ping client! \
-                     You might have forgotten to run network setup: {}",
-                    e
-                )
-            })?;
-        let _ = pingclient.ping().await.map_err(|e| {
-            let _ = self.remove_publisher(path.clone());
-            eprintln!(
-                "Removed registered publisher {} upon unsuccessful confirmation",
-                &path
-            );
-            e
-        })?; // Make sure that we can ping and obtain results
+    //     let pingclient = PingClient::new(
+    //         publisher_info.socket(), publisher_info.uds_path())
+    //         .await
+    //         .map_err(|e| {
+    //             let _ = self.remove_publisher(path.clone());
+    //             eprintln!(
+    //                 "Removed registered publisher {} upon unsuccessful confirmation",
+    //                 &path
+    //             );
+    //             format!(
+    //                 "Publisher confirmation failed: metaserver failed to create ping client! \
+    //                  You might have forgotten to run network setup: {}",
+    //                 e
+    //             )
+    //         })?;
+    //     let _ = pingclient.ping().await.map_err(|e| {
+    //         let _ = self.remove_publisher(path.clone());
+    //         eprintln!(
+    //             "Removed registered publisher {} upon unsuccessful confirmation",
+    //             &path
+    //         );
+    //         e
+    //     })?; // Make sure that we can ping and obtain results
 
-        // Now that things are ok, add pingclient
-        self.confirmed_publishers.insert(path, pingclient);
-        Ok(())
-    }
+    //     // Now that things are ok, add pingclient
+    //     self.confirmed_publishers.insert(path, pingclient);
+    //     Ok(())
+    // }
 
     pub fn remove_publisher(&mut self, path: String) -> OrError<PublisherInfo> {
         // Validate path format strictly
@@ -162,8 +153,6 @@ impl ServerState {
                 self.path_tree.remove_child_and_branch(&path)?;
                 // Remove from confirmed_publishers if it exists (it may not if confirmation failed)
                 self.confirmed_publishers.remove(&path);
-                self.address_manager
-                    .free_address(publisher_info.service_socket.ip().clone())?;
                 Ok(publisher_info)
             }
             None => Err(format!(
@@ -187,12 +176,10 @@ impl ServerState {
             self.confirmed_publishers.get_mut(&path),
         ) {
             (Some(publisher), Some(pingclient)) => {
-                pingclient
-                    .ping()
-                    .await
-                    .map_err(|_| {
-                        format!("Cannot ping {}. Publisher might be stale", path)
-                    })?;
+                // pingclient
+                //     .ping()
+                //     .await
+                //     .map_err(|_| format!("Cannot ping {}. Publisher might be stale", path))?;
                 Ok(publisher.clone())
             }
             (Some(_), None) => Err(format!(
@@ -291,7 +278,7 @@ impl ServerState {
     }
 
     pub async fn prune_stale_publishers(&mut self) -> Vec<String> {
-        let mut stale_paths = Vec::new();
+        let mut stale_paths: Vec<String> = Vec::new();
 
         // Collect paths to check to avoid borrowing issues
         let paths_to_check: Vec<String> = self.confirmed_publishers.keys().cloned().collect();
@@ -299,10 +286,10 @@ impl ServerState {
         // Iterate over all confirmed publishers and ping each one
         for path in paths_to_check {
             if let Some(ping_client) = self.confirmed_publishers.get_mut(&path) {
-                if let Err(_) = ping_client.ping().await {
-                    // Ping failed, mark as stale
-                    stale_paths.push(path.clone());
-                }
+                // if let Err(_) = ping_client.ping().await {
+                //     // Ping failed, mark as stale
+                //     stale_paths.push(path.clone());
+                // }
             }
         }
 
@@ -366,14 +353,16 @@ impl AgoraMeta for AgoraMetaServer {
         _: context::Context,
         name: String,
         path: String,
+        host_connection: ConnectionHandle
     ) -> OrError<PublisherInfo> {
         let mut state = self.state.write().await;
-        state.register_publisher(name, path)
+        state.register_publisher(name, path, host_connection)
     }
 
     async fn confirm_publisher(self, _: context::Context, path: String) -> OrError<()> {
-        let mut state = self.state.write().await;
-        state.confirm_publisher(path).await
+        Ok(())
+        // let mut state = self.state.write().await;
+        // state.confirm_publisher(path).await
     }
 
     async fn remove_publisher(self, _: context::Context, path: String) -> OrError<PublisherInfo> {
@@ -400,11 +389,11 @@ impl AgoraMetaServer {
         }
     }
 
-    pub async fn run_server(address: Ipv6Addr, port: u16) -> anyhow::Result<()> {
-        let server_addr = (IpAddr::V6(address), port);
+    pub async fn run_server(address: IpAddr, port: u16) -> anyhow::Result<()> {
+        let server_addr = (address, port);
 
         // Create a single shared server state that all connections will use
-        let shared_state = Arc::new(RwLock::new(ServerState::new(port)));
+        let shared_state = Arc::new(RwLock::new(ServerState::new()));
 
         // JSON transport is provided by the json_transport tarpc module. It makes it easy
         // to start up a serde-powered json serialization strategy over TCP.

@@ -1,53 +1,64 @@
-use agora::constants::PUBLISHER_SERVICE_PORT;
+use agora::constants::GATEWAY_PORT;
 use agora::rawstream::RawStreamClient;
+use agora::ConnectionHandle;
 use clap::Parser;
 use futures_util::StreamExt;
 use indoc::indoc;
-use std::net::Ipv6Addr;
+use std::net::IpAddr;
+use std::path::Path;
 
 #[derive(Parser)]
-#[command(version, about = "Raw Stream Client - connects to WebSocket server and prints messages", long_about = None)]
+#[command(version, about = "Raw Stream Client - connects to WebSocket server via gateway", long_about = None)]
 struct Args {
-    #[arg(short, long, default_value_t = PUBLISHER_SERVICE_PORT)]
+    #[arg(short, long, default_value_t = GATEWAY_PORT)]
     port: u16,
 
     #[arg(long, default_value = "::1")]
     host: String,
+
+    #[arg(long, default_value = "test/publisher", help = "Directory path (maps to /tmp/agora/{directory}/rawstream.sock)")]
+    directory: String,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    // Parse the IPv6 address
-    let address: Ipv6Addr = args
+    // Parse the IP address (supports both IPv4 and IPv6)
+    let address: IpAddr = args
         .host
         .parse()
-        .map_err(|_| anyhow::anyhow!("Invalid IPv6 address: {}", args.host))?;
+        .map_err(|_| anyhow::anyhow!("Invalid IP address: {}", args.host))?;
+
+    let gateway = ConnectionHandle::new(address, args.port);
+    let directory_path = Path::new(&args.directory);
 
     println!(
-        "🔗 Connecting to Raw Stream Server at [{}]:{}",
-        address, args.port
+        "🔗 Connecting to Raw Stream via gateway at {}/rawstream/{}",
+        gateway,
+        args.directory
     );
 
     // Create client with String type
-    let client: RawStreamClient<String> = match RawStreamClient::new(address, args.port, None, None)
-    {
-        Ok(client) => {
-            println!("✅ Connected successfully!");
-            client
-        }
-        Err(e) => {
-            eprintln!("❌ Failed to connect to server: {}", e);
-            print!(
-                "{}",
-                indoc! {"
-                    Make sure the RawStreamServer is running with: cargo run --bin rawstreamserver
+    let client: RawStreamClient<String> =
+        match RawStreamClient::new(gateway, directory_path, None, None) {
+            Ok(client) => {
+                println!("✅ Connected successfully!");
+                client
+            }
+            Err(e) => {
+                eprintln!("❌ Failed to connect to server: {}", e);
+                print!(
+                    "{}",
+                    indoc! {"
+                    Make sure:
+                    1. Gateway is running: cargo run --bin gateway
+                    2. RawStreamServer is running: cargo run --bin rawstreamserver
                 "}
-            );
-            return Ok(());
-        }
-    };
+                );
+                return Ok(());
+            }
+        };
 
     println!("📡 Listening for messages... (Press Ctrl+C to exit)\n");
 

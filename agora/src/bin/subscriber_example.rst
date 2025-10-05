@@ -1,4 +1,4 @@
-use agora::constants::METASERVER_DEFAULT_PORT;
+use agora::constants::METASERVER_PORT;
 use agora::{Agorable, Subscriber};
 use futures_util::StreamExt;
 use indoc::indoc;
@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!(
         "Make sure the metaserver is running on port {}!\n",
-        METASERVER_DEFAULT_PORT
+        METASERVER_PORT
     );
 
     // Get subscriber configuration from user
@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create subscriber
     let mut subscriber =
-        Subscriber::<Message>::new(path.clone(), Ipv6Addr::LOCALHOST, METASERVER_DEFAULT_PORT)
+        Subscriber::<Message>::new(path.clone(), Ipv6Addr::LOCALHOST, METASERVER_PORT)
             .await
             .map_err(|e| format!("Failed to create subscriber: {}", e))?;
 

@@ -1,34 +1,40 @@
 use super::protocol::AgoraMetaClient;
 use super::publisher_info::PublisherInfo;
+use crate::ConnectionHandle;
 use crate::utils::OrError;
 use crate::utils::{TreeNode, TreeNodeRef, TreeTrait};
 use std::net::{IpAddr, Ipv6Addr};
 use tarpc::{client, context, tokio_serde::formats::Json};
 
 pub struct AgoraClient {
-    address: Ipv6Addr,
-    port: u16,
+    connection: ConnectionHandle,
     client: AgoraMetaClient,
 }
 
 // Wrapper around tarpc-generated AgoraMetaClient to have persistent connection.
 impl AgoraClient {
-    pub async fn new(address: Ipv6Addr, port: u16) -> anyhow::Result<Self> {
-        let server_addr = (IpAddr::V6(address), port);
-        let mut transport = tarpc::serde_transport::tcp::connect(server_addr, Json::default);
+    pub async fn new(port: u16) -> OrError<Self> {
+        let connection = ConnectionHandle::new_local(port)?;
+        let mut transport =
+            tarpc::serde_transport::tcp::connect(connection.addr_port(), Json::default);
         transport.config_mut().max_frame_length(usize::MAX);
-        let client = AgoraMetaClient::new(client::Config::default(), transport.await?).spawn();
-        Ok(Self {
-            address,
-            port,
-            client,
-        })
+        let client = AgoraMetaClient::new(
+            client::Config::default(),
+            transport.await.map_err(|e| {
+                format!(
+                    "Agora MetaClient error: failed to create tarpc client. {}",
+                    e
+                )
+            })?,
+        )
+        .spawn();
+        Ok(Self { connection, client })
     }
 
     pub async fn register_publisher(&self, name: String, path: String) -> OrError<PublisherInfo> {
         let result = self
             .client
-            .register_publisher(context::current(), name, path)
+            .register_publisher(context::current(), name, path, self.connection.clone())
             .await
             .map_err(|e| format!("RPC error: {}", e))?;
         result
@@ -77,6 +83,6 @@ impl AgoraClient {
 impl Clone for AgoraClient {
     fn clone(&self) -> Self {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move { Self::new(self.address, self.port).await.unwrap() })
+        rt.block_on(async move { Self::new(self.connection.port()).await.unwrap() })
     }
 }

@@ -1,16 +1,16 @@
-use agora::constants::METASERVER_DEFAULT_PORT;
+use agora::constants::METASERVER_PORT;
 use agora::metaserver::AgoraMetaServer;
 use clap::Parser;
-use std::net::Ipv6Addr;
+use std::net::IpAddr;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Args {
-    #[arg(short, long, default_value_t = METASERVER_DEFAULT_PORT)]
+    #[arg(short, long, default_value_t = METASERVER_PORT)]
     port: u16,
 
     #[arg(short, long, default_value = "::1")]
-    address: Ipv6Addr,
+    address: IpAddr,
 }
 
 #[tokio::main]

@@ -1,34 +1,29 @@
-use agora::constants::PUBLISHER_SERVICE_PORT;
 use agora::rawstream::RawStreamServer;
 use clap::Parser;
 use indoc::indoc;
 use std::io::{self, Write};
-use std::net::Ipv6Addr;
+use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 #[derive(Parser)]
-#[command(version, about = "Raw Stream Server - streams user input to WebSocket clients", long_about = None)]
+#[command(version, about = "Raw Stream Server - streams user input to WebSocket clients via UDS", long_about = None)]
 struct Args {
-    #[arg(short, long, default_value_t = PUBLISHER_SERVICE_PORT)]
-    port: u16,
-
-    #[arg(long, default_value = "::1")]
-    host: String,
+    #[arg(long, default_value = "test/publisher", help = "Directory path under /tmp/agora")]
+    directory: String,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    // Parse the IPv6 address
-    let address: Ipv6Addr = args
-        .host
-        .parse()
-        .map_err(|_| anyhow::anyhow!("Invalid IPv6 address: {}", args.host))?;
+    let uds_path = PathBuf::from(format!(
+        "/tmp/agora/{}/rawstream.sock",
+        args.directory
+    ));
 
     println!(
-        "🚀 Starting Raw Stream Server on [{}]:{}",
-        address, args.port
+        "🚀 Starting Raw Stream Server at UDS: {}",
+        uds_path.display()
     );
     print!(
         "{}",
@@ -37,8 +32,8 @@ async fn main() -> anyhow::Result<()> {
         "}
     );
     println!(
-        "🔌 Clients can connect via WebSocket to ws://[{}]:{}",
-        address, args.port
+        "🔌 Clients connect via gateway: ws://[gateway_host]:port/rawstream/{}",
+        args.directory
     );
     print!(
         "{}",
@@ -47,8 +42,8 @@ async fn main() -> anyhow::Result<()> {
         "}
     );
 
-    // Create and start the server (this initializes everything)
-    let server: RawStreamServer<String> = RawStreamServer::new(address, args.port, None)
+    // Create and start the server
+    let server: RawStreamServer<String> = RawStreamServer::new(&uds_path, None)
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
 

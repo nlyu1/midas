@@ -1,53 +1,56 @@
 pub mod constants;
-mod core;
+// mod core;
 pub mod metaserver;
-mod ping;
-mod pywrappers;
+// mod ping;
+// mod pywrappers;
 pub mod rawstream;
-mod relay;
+// mod relay;
 pub mod utils;
+pub use utils::ConnectionHandle;
 
-// Re-export core types at the top level for easy access
-pub use core::common::{Agorable, AgorableOption};
-pub use core::publisher::Publisher;
-pub use core::subscriber::{OmniSubscriber, Subscriber};
-pub use relay::Relay;
+pub mod gateway;
 
-use pyo3::prelude::*;
+// // Re-export core types at the top level for easy access
+// pub use core::common::{Agorable, AgorableOption};
+// pub use core::publisher::Publisher;
+// pub use core::subscriber::{OmniSubscriber, Subscriber};
+// pub use relay::Relay;
 
-/// A Python module implemented in Rust.
-#[pymodule]
-fn agora(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // Original classes for backward compatibility
-    m.add_class::<pywrappers::subscribers::PyOmniSubscriber>()?;
+// use pyo3::prelude::*;
 
-    // Typed subscribers
-    m.add_class::<pywrappers::subscribers::PyStringSubscriber>()?;
-    m.add_class::<pywrappers::subscribers::PyI64Subscriber>()?;
-    m.add_class::<pywrappers::subscribers::PyBoolSubscriber>()?;
-    m.add_class::<pywrappers::subscribers::PyF64Subscriber>()?;
-    m.add_class::<pywrappers::subscribers::PyF32Subscriber>()?;
+// /// A Python module implemented in Rust.
+// #[pymodule]
+// fn agora(m: &Bound<'_, PyModule>) -> PyResult<()> {
+//     // Original classes for backward compatibility
+//     m.add_class::<pywrappers::subscribers::PyOmniSubscriber>()?;
 
-    // Typed publishers
-    m.add_class::<pywrappers::publishers::PyStringPublisher>()?;
-    m.add_class::<pywrappers::publishers::PyI64Publisher>()?;
-    m.add_class::<pywrappers::publishers::PyBoolPublisher>()?;
-    m.add_class::<pywrappers::publishers::PyF64Publisher>()?;
-    m.add_class::<pywrappers::publishers::PyF32Publisher>()?;
+//     // Typed subscribers
+//     m.add_class::<pywrappers::subscribers::PyStringSubscriber>()?;
+//     m.add_class::<pywrappers::subscribers::PyI64Subscriber>()?;
+//     m.add_class::<pywrappers::subscribers::PyBoolSubscriber>()?;
+//     m.add_class::<pywrappers::subscribers::PyF64Subscriber>()?;
+//     m.add_class::<pywrappers::subscribers::PyF32Subscriber>()?;
 
-    // Typed relays
-    m.add_class::<pywrappers::relays::PyStringRelay>()?;
-    m.add_class::<pywrappers::relays::PyI64Relay>()?;
-    m.add_class::<pywrappers::relays::PyBoolRelay>()?;
-    m.add_class::<pywrappers::relays::PyF64Relay>()?;
-    m.add_class::<pywrappers::relays::PyF32Relay>()?;
+//     // Typed publishers
+//     m.add_class::<pywrappers::publishers::PyStringPublisher>()?;
+//     m.add_class::<pywrappers::publishers::PyI64Publisher>()?;
+//     m.add_class::<pywrappers::publishers::PyBoolPublisher>()?;
+//     m.add_class::<pywrappers::publishers::PyF64Publisher>()?;
+//     m.add_class::<pywrappers::publishers::PyF32Publisher>()?;
 
-    // Typed iterators
-    m.add_class::<pywrappers::subscribers::PyStringIterator>()?;
-    m.add_class::<pywrappers::subscribers::PyI64Iterator>()?;
-    m.add_class::<pywrappers::subscribers::PyBoolIterator>()?;
-    m.add_class::<pywrappers::subscribers::PyF64Iterator>()?;
-    m.add_class::<pywrappers::subscribers::PyF32Iterator>()?;
+//     // Typed relays
+//     m.add_class::<pywrappers::relays::PyStringRelay>()?;
+//     m.add_class::<pywrappers::relays::PyI64Relay>()?;
+//     m.add_class::<pywrappers::relays::PyBoolRelay>()?;
+//     m.add_class::<pywrappers::relays::PyF64Relay>()?;
+//     m.add_class::<pywrappers::relays::PyF32Relay>()?;
 
-    Ok(())
-}
+//     // Typed iterators
+//     m.add_class::<pywrappers::subscribers::PyStringIterator>()?;
+//     m.add_class::<pywrappers::subscribers::PyI64Iterator>()?;
+//     m.add_class::<pywrappers::subscribers::PyBoolIterator>()?;
+//     m.add_class::<pywrappers::subscribers::PyF64Iterator>()?;
+//     m.add_class::<pywrappers::subscribers::PyF32Iterator>()?;
+
+//     Ok(())
+// }

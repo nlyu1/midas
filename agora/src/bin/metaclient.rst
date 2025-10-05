@@ -1,5 +1,5 @@
 use agora::OmniSubscriber;
-use agora::constants::METASERVER_DEFAULT_PORT;
+use agora::constants::METASERVER_PORT;
 use agora::metaserver::AgoraClient;
 use agora::utils::TreeTrait;
 use clap::Parser;
@@ -13,7 +13,7 @@ use tokio::select;
 #[derive(Parser)]
 #[command(version, about = "Interactive MetaClient for exploring and monitoring Agora MetaServer", long_about = None)]
 struct Args {
-    #[arg(short, long, default_value_t = METASERVER_DEFAULT_PORT)]
+    #[arg(short, long, default_value_t = METASERVER_PORT)]
     port: u16,
 
     #[arg(short, long, default_value = "::1")]

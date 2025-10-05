@@ -1,4 +1,4 @@
-use agora::constants::METASERVER_DEFAULT_PORT;
+use agora::constants::METASERVER_PORT;
 use agora::{Agorable, Publisher};
 use clap::Parser;
 use indoc::indoc;
@@ -12,7 +12,7 @@ use tokio;
 #[command(author, version, about, long_about = None)]
 struct Cli {
     /// Port for the metaserver
-    #[arg(short, long, default_value_t = METASERVER_DEFAULT_PORT)]
+    #[arg(short, long, default_value_t = METASERVER_PORT)]
     port: u16,
 
     #[arg(short, long, default_value = "::1")]

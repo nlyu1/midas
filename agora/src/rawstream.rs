@@ -1,8 +1,9 @@
+use crate::ConnectionHandle;
 use crate::utils::OrError;
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
-use std::net::{Ipv6Addr, SocketAddr};
-use tokio::net::TcpListener;
+use std::path::Path;
+use tokio::net::UnixListener;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::BroadcastStream;
@@ -27,31 +28,19 @@ where
         let timestamp = Utc::now().format("%H:%M:%S");
         eprintln!("RawStreamClient error {}: {}", timestamp, message);
     }
-    /// Creates a new WebSocket client that connects to the specified server.
-    ///
-    /// # Parameters
-    ///
-    /// - `address`: IPv6 address of the server to connect to
-    /// - `port`: Port number of the server
-    /// - `poll_connection_every_ms`: How often to retry connection attempts (default: 100ms)
-    /// - `buffer_size`: Maximum number of messages to buffer (default: 1024)
-    ///
-    /// # Returns
-    ///
-    /// A client instance that immediately starts attempting to connect in the background.
-    /// Use `subscribe()` to get a stream of messages.
     pub fn new(
-        address: Ipv6Addr,
-        port: u16,
+        host_gateway: ConnectionHandle,
+        socket_path: &Path,
         poll_connection_every_ms: Option<u64>,
         buffer_size: Option<usize>,
     ) -> OrError<Self> {
         let poll_interval = poll_connection_every_ms.unwrap_or(100);
-        let buffer_capacity = buffer_size.unwrap_or(1024);
+        let buffer_capacity = buffer_size.unwrap_or(4096);
         let (tx, rx) = broadcast::channel::<T>(buffer_capacity);
 
-        // Construct WebSocket URL for IPv6 address
-        let addr_string = format!("ws://[{}]:{}", address, port);
+        // Construct WebSocket URL: ws://host:port/rawstream/{path}
+        // Gateway will map this to /tmp/agora/{path}/rawstream.sock
+        let addr_string = format!("ws://{}/rawstream/{}", host_gateway, socket_path.to_string_lossy());
 
         // Spawn background task for connection handling
         let bg_handle = tokio::spawn(async move {
@@ -149,6 +138,7 @@ where
     sender: tokio::sync::mpsc::UnboundedSender<T>,
     ingest_handle: JoinHandle<()>,
     connection_handle: JoinHandle<()>,
+    socket_path: std::path::PathBuf,
 }
 
 impl<T> RawStreamServer<T>
@@ -156,20 +146,42 @@ where
     T: Clone + Send + 'static + Into<Vec<u8>> + TryFrom<Vec<u8>>,
     <T as TryFrom<Vec<u8>>>::Error: std::fmt::Display,
 {
-    pub async fn new(address: Ipv6Addr, port: u16, buffer_size: Option<usize>) -> OrError<Self> {
+    pub async fn new(socket_path: &Path, buffer_size: Option<usize>) -> OrError<Self> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
-        // Set up server address and bind listener
-        let addr = SocketAddr::new(address.into(), port);
-        let listener = TcpListener::bind(&addr).await.map_err(|e| e.to_string())?;
-
+        // Create parent directory if it doesn't exist
+        if let Some(parent) = socket_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                format!(
+                    "Failed to create socket directory {}: {}",
+                    parent.display(),
+                    e
+                )
+            })?;
+        }
+        // Remove existing socket file if present (from previous unclean shutdown)
+        if socket_path.exists() {
+            std::fs::remove_file(socket_path).map_err(|e| {
+                format!(
+                    "Failed to remove existing socket {}: {}",
+                    socket_path.display(),
+                    e
+                )
+            })?;
+        }
+        // Bind Unix domain socket listener at the specified path
+        let listener = UnixListener::bind(socket_path).map_err(|e| {
+            format!(
+                "Failed to bind Unix socket {}: {}",
+                socket_path.display(),
+                e
+            )
+        })?;
         // Create broadcast channel to fan out input_stream to all clients
-        let buffer_capacity = buffer_size.unwrap_or(1024);
+        let buffer_capacity = buffer_size.unwrap_or(4096);
         let (broadcast_tx, _) = broadcast::channel::<T>(buffer_capacity);
-
         // Convert receiver to stream for ingestion
         let mut input_stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
-
         // Task 1: Ingestion - pull data from input_stream and broadcast it
         let ingest_tx = broadcast_tx.clone();
         let ingest_handle = tokio::spawn(async move {
@@ -177,17 +189,14 @@ where
                 let _ = ingest_tx.send(data); // Ignore error if no clients
             }
         });
-
         // Task 2: Connection handling - accept new clients and serve them
         let connection_handle = tokio::spawn(async move {
             loop {
-                if let Ok((tcp_stream, _)) = listener.accept().await {
+                if let Ok((unix_stream, _)) = listener.accept().await {
                     let mut client_rx = broadcast_tx.subscribe();
-
                     tokio::spawn(async move {
-                        if let Ok(ws_stream) = accept_async(tcp_stream).await {
+                        if let Ok(ws_stream) = accept_async(unix_stream).await {
                             let (mut ws_sender, _) = ws_stream.split();
-
                             // Forward broadcast messages to this client
                             while let Ok(data) = client_rx.recv().await {
                                 if ws_sender
@@ -208,6 +217,7 @@ where
             sender: tx,
             ingest_handle,
             connection_handle,
+            socket_path: socket_path.to_path_buf(),
         })
     }
 
@@ -226,5 +236,10 @@ where
     fn drop(&mut self) {
         self.ingest_handle.abort();
         self.connection_handle.abort();
+
+        // Clean up socket file
+        if self.socket_path.exists() {
+            let _ = std::fs::remove_file(&self.socket_path);
+        }
     }
 }

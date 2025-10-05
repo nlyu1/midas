@@ -1,10 +1,15 @@
 use super::publisher_info::PublisherInfo;
+use crate::ConnectionHandle;
 use crate::utils::OrError;
 
 #[tarpc::service]
 pub trait AgoraMeta {
     /// Registers a new publisher at the specified path.
-    async fn register_publisher(name: String, path: String) -> OrError<PublisherInfo>;
+    async fn register_publisher(
+        name: String,
+        path: String,
+        host_connection: ConnectionHandle,
+    ) -> OrError<PublisherInfo>;
     /// Confirms a registered publisher by pinging it.
     async fn confirm_publisher(path: String) -> OrError<()>;
     /// Removes a publisher from the specified path.
