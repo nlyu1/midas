@@ -1,4 +1,5 @@
 use super::BinanceStreamable;
+use crate::scribe::ArgusParquetable; 
 use crate::types::{Price, TradeSize, TradingSymbol};
 use agora::Agorable;
 use agora::utils::OrError;
@@ -135,5 +136,124 @@ impl BinanceStreamable for TradeUpdate {
 
     fn symbol(&self) -> TradingSymbol {
         self.symbol.clone()
+    }
+}
+
+impl ArgusParquetable for TradeUpdate {
+    fn arrow_schema() -> std::sync::Arc<arrow::datatypes::Schema> {
+        use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+        use std::sync::Arc;
+
+        Arc::new(Schema::new(vec![
+            Field::new("symbol", DataType::Utf8, false),
+            Field::new(
+                "event_time",
+                DataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into())),
+                false,
+            ),
+            Field::new(
+                "received_time",
+                DataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into())),
+                false,
+            ),
+            Field::new("trade_id", DataType::UInt64, false),
+            Field::new("price", DataType::Float64, false),
+            Field::new("size", DataType::Float64, false),
+            Field::new("buyer_order_id", DataType::UInt64, false),
+            Field::new("seller_order_id", DataType::UInt64, false),
+            Field::new(
+                "trade_time",
+                DataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into())),
+                false,
+            ),
+            Field::new("is_bid_quote", DataType::Boolean, false),
+        ]))
+    }
+
+    fn to_record_batch(data: Vec<Self>) -> OrError<arrow::record_batch::RecordBatch> {
+        use arrow::array::{
+            ArrayRef, BooleanArray, Float64Array, StringArray, TimestampMillisecondArray,
+            UInt64Array,
+        };
+        use arrow::record_batch::RecordBatch;
+        use std::sync::Arc;
+
+        let schema = Self::arrow_schema();
+
+        // Convert each field to Arrow arrays
+        let symbols: ArrayRef = Arc::new(StringArray::from(
+            data.iter()
+                .map(|d| d.symbol.to_string())
+                .collect::<Vec<_>>(),
+        ));
+
+        let event_times: ArrayRef = Arc::new(
+            TimestampMillisecondArray::from(
+                data.iter()
+                    .map(|d| d.event_time.timestamp_millis())
+                    .collect::<Vec<_>>(),
+            )
+            .with_timezone("UTC"),
+        );
+
+        let received_times: ArrayRef = Arc::new(
+            TimestampMillisecondArray::from(
+                data.iter()
+                    .map(|d| d.received_time.timestamp_millis())
+                    .collect::<Vec<_>>(),
+            )
+            .with_timezone("UTC"),
+        );
+
+        let trade_ids: ArrayRef = Arc::new(UInt64Array::from(
+            data.iter().map(|d| d.trade_id).collect::<Vec<_>>(),
+        ));
+
+        let prices: ArrayRef = Arc::new(Float64Array::from(
+            data.iter().map(|d| d.price.to_f64()).collect::<Vec<_>>(),
+        ));
+
+        let sizes: ArrayRef = Arc::new(Float64Array::from(
+            data.iter().map(|d| d.size.to_f64()).collect::<Vec<_>>(),
+        ));
+
+        let buyer_order_ids: ArrayRef = Arc::new(UInt64Array::from(
+            data.iter().map(|d| d.buyer_order_id).collect::<Vec<_>>(),
+        ));
+
+        let seller_order_ids: ArrayRef = Arc::new(UInt64Array::from(
+            data.iter().map(|d| d.seller_order_id).collect::<Vec<_>>(),
+        ));
+
+        let trade_times: ArrayRef = Arc::new(
+            TimestampMillisecondArray::from(
+                data.iter()
+                    .map(|d| d.trade_time.timestamp_millis())
+                    .collect::<Vec<_>>(),
+            )
+            .with_timezone("UTC"),
+        );
+
+        let is_bid_quotes: ArrayRef = Arc::new(BooleanArray::from(
+            data.iter().map(|d| d.is_bid_quote).collect::<Vec<_>>(),
+        ));
+
+        // Create RecordBatch
+        RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                symbols,
+                event_times,
+                received_times,
+                trade_ids,
+                prices,
+                sizes,
+                buyer_order_ids,
+                seller_order_ids,
+                trade_times,
+                is_bid_quotes,
+            ],
+        )
+        .map_err(|e| format!("Failed to create RecordBatch: {}", e))
     }
 }

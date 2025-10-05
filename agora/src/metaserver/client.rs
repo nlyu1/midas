@@ -60,7 +60,7 @@ impl AgoraClient {
             .map_err(|e| format!("RPC error: {}", e))?;
 
         // Reconstruct TreeNodeRef from string representation
-        println!("Tree representation: {}", tree_repr);
+        // println!("Tree representation: {}", tree_repr);
         TreeNode::from_repr(&tree_repr)
     }
 

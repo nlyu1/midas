@@ -4,7 +4,7 @@ use crate::types::TradingSymbol;
 use agora::utils::OrError;
 use agora::{AgorableOption, Publisher};
 use futures_util::{SinkExt, StreamExt};
-use rand::Rng;
+// use rand::Rng;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::net::Ipv6Addr;
@@ -34,10 +34,10 @@ impl<T: BinanceStreamable> BinanceWebstreamWorker<T> {
             );
         }
 
-        let mut rng = rand::rng();
-        let random_hash: String = (0..6)
-            .map(|_| rng.sample(rand::distr::Alphanumeric) as char)
-            .collect();
+        // let mut rng = rand::rng();
+        // let random_hash: String = (0..6)
+        //     .map(|_| rng.sample(rand::distr::Alphanumeric) as char)
+        //     .collect();
 
         // Agora paths for each symbol
         let agora_paths: Vec<String> = symbols
@@ -55,7 +55,8 @@ impl<T: BinanceStreamable> BinanceWebstreamWorker<T> {
         // Create publishers for each symbol
         let mut publishers: Vec<Publisher<AgorableOption<T>>> = Vec::new();
         for (symbol, agora_path) in symbols.iter().zip(agora_paths.iter()) {
-            let publisher_name = format!("{}_{}", random_hash, symbol.to_string());
+            // Make sure this is true! Scribe relies on data to identify symbols
+            let publisher_name = symbol.to_string();
             let publisher = Publisher::<AgorableOption<T>>::new(
                 publisher_name,
                 agora_path.clone(),

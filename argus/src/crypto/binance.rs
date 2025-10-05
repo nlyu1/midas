@@ -1,7 +1,7 @@
 mod bbo;
 mod orderbook;
-mod trade;
-mod worker;
+mod publisher;
+mod trades;
 
 use crate::types::TradingSymbol;
 use agora::Agorable;
@@ -28,5 +28,5 @@ pub trait BinanceRest: Agorable + Sized {
 
 pub use bbo::BboUpdate;
 pub use orderbook::{OrderbookDepthUpdate, OrderbookDiffUpdate};
-pub use trade::TradeUpdate;
-pub use worker::{BinanceWebstreamSymbol, BinanceWebstreamWorker};
+pub use publisher::{BinanceWebstreamSymbol, BinanceWebstreamWorker};
+pub use trades::TradeUpdate;
