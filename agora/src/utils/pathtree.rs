@@ -42,12 +42,9 @@ impl TreeTrait for TreeNode {
     }
 
     fn add_children(self: &Arc<Self>, names: &[&str]) {
-        // Create children of names as specified; set their parents correctly
         for name in names {
-            let child = TreeNode::new(&name);
-            // Set parent of child
+            let child = TreeNode::new(name);
             *child.parent.lock().unwrap() = Some(Arc::downgrade(self));
-            // Add child to this node
             self.children.lock().unwrap().push(child);
         }
     }
@@ -80,7 +77,7 @@ impl TreeTrait for TreeNode {
     }
 
     fn remove_child(self: &TreeNodeRef, path: &str) -> OrError<()> {
-        let child = self.get_child(&path)?;
+        let child = self.get_child(path)?;
         let child_name = child.name();
         child.parent()?.remove_immediate_child(child_name)
     }
@@ -90,10 +87,10 @@ impl TreeTrait for TreeNode {
     fn remove_child_and_branch(self: &TreeNodeRef, path: &str) -> OrError<()> {
         let child = self.get_child(path)?;
         if child.is_root() {
-            return Err(format!("Cannot remove root node"));
+            return Err("Cannot remove root node".to_string());
         }
         if !child.is_leaf() {
-            return Err(format!("Cannot remove non-leaf node"));
+            return Err("Cannot remove non-leaf node".to_string());
         }
         // Returns the closest-to-root node that has more than one child, as well as name of the branch
         let (branching_ancestor, branch_name) = child.branching_ancestor()?;
@@ -125,7 +122,7 @@ impl TreeTrait for TreeNode {
 
     fn path(&self) -> String {
         if self.is_root() {
-            format!("/{}", self.name().to_string())
+            format!("/{}", self.name())
         } else {
             format!("{}/{}", self.parent().unwrap().path(), self.name())
         }

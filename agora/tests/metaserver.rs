@@ -1,20 +1,6 @@
-use agora::metaserver::ServerState;
-use agora::utils::TreeTrait;
+mod common;
 
-fn create_test_instance() -> ServerState {
-    let state = ServerState::new(8080); // Use test UID of 8080
-
-    // Create a basic tree structure for testing
-    state.path_tree().add_children(&["api", "static", "admin"]);
-    let api = state.path_tree().get_child("api").unwrap();
-    api.add_children(&["v1", "v2"]);
-    let v1 = api.get_child("v1").unwrap();
-    v1.add_children(&["users", "posts", "auth"]);
-
-    state
-}
-
-// No longer needed - publishers are created during registration
+use common::{create_test_server_state, default_test_connection, test_connection};
 
 #[cfg(test)]
 mod tests {
@@ -22,11 +8,14 @@ mod tests {
 
     #[test]
     fn publisher_register_success() {
-        let mut process = create_test_instance();
+        let mut process = create_test_server_state();
 
         // Test registering a new publisher at a path that doesn't exist in tree yet
-        let result =
-            process.register_publisher("test_publisher".to_string(), "new/endpoint".to_string());
+        let result = process.register_publisher(
+            "test_publisher".to_string(),
+            "new/endpoint".to_string(),
+            default_test_connection(),
+        );
         assert!(
             result.is_ok(),
             "Should successfully register publisher at new path"
@@ -38,6 +27,7 @@ mod tests {
         let result2 = process.register_publisher(
             "another_publisher".to_string(),
             "different/path".to_string(),
+            test_connection(8082),
         );
         assert!(
             result2.is_ok(),
@@ -45,8 +35,11 @@ mod tests {
         );
 
         // Test registering at root level for non-existent path
-        let result3 =
-            process.register_publisher("root_publisher".to_string(), "nonexistent".to_string());
+        let result3 = process.register_publisher(
+            "root_publisher".to_string(),
+            "nonexistent".to_string(),
+            test_connection(8083),
+        );
         assert!(
             result3.is_ok(),
             "Should successfully register publisher at new root path"
@@ -55,11 +48,14 @@ mod tests {
 
     #[test]
     fn publisher_register_fail() {
-        let mut process = create_test_instance();
+        let mut process = create_test_server_state();
 
         // Try to register with empty path - should fail
-        let empty_path_result =
-            process.register_publisher("test_publisher".to_string(), "".to_string());
+        let empty_path_result = process.register_publisher(
+            "test_publisher".to_string(),
+            "".to_string(),
+            default_test_connection(),
+        );
         assert!(
             empty_path_result.is_err(),
             "Should fail to register with empty path"
@@ -70,16 +66,22 @@ mod tests {
         );
 
         // Register at a valid new path first
-        let valid_result =
-            process.register_publisher("test_publisher".to_string(), "new/path".to_string());
+        let valid_result = process.register_publisher(
+            "test_publisher".to_string(),
+            "new/path".to_string(),
+            default_test_connection(),
+        );
         assert!(
             valid_result.is_ok(),
             "Should succeed to register at new path"
         );
 
         // Try to register at same path again - should fail due to duplicate registration
-        let duplicate_result =
-            process.register_publisher("duplicate_publisher".to_string(), "new/path".to_string());
+        let duplicate_result = process.register_publisher(
+            "duplicate_publisher".to_string(),
+            "new/path".to_string(),
+            test_connection(8082),
+        );
         assert!(
             duplicate_result.is_err(),
             "Should fail to register duplicate at same path"
@@ -92,10 +94,14 @@ mod tests {
 
     #[test]
     fn publisher_register_fail_parent_is_publisher() {
-        let mut process = create_test_instance();
+        let mut process = create_test_server_state();
 
         // First register a publisher at "dir"
-        let dir_result = process.register_publisher("dir_publisher".to_string(), "dir".to_string());
+        let dir_result = process.register_publisher(
+            "dir_publisher".to_string(),
+            "dir".to_string(),
+            default_test_connection(),
+        );
         assert!(
             dir_result.is_ok(),
             "Should successfully register publisher at 'dir'"
@@ -103,8 +109,11 @@ mod tests {
 
         // Now try to register a publisher at "dir/content" - should fail
         // because "dir" is already a publisher and should be a directory only
-        let content_result =
-            process.register_publisher("content_publisher".to_string(), "dir/content".to_string());
+        let content_result = process.register_publisher(
+            "content_publisher".to_string(),
+            "dir/content".to_string(),
+            test_connection(8082),
+        );
         assert!(
             content_result.is_err(),
             "Should fail to register under path that has a publisher"
@@ -121,6 +130,7 @@ mod tests {
         let deep_content_result = process.register_publisher(
             "deep_content_publisher".to_string(),
             "dir/sub/content".to_string(),
+            test_connection(8083),
         );
         assert!(
             deep_content_result.is_err(),
@@ -136,11 +146,14 @@ mod tests {
 
     #[test]
     fn publisher_register_child_then_parent_fails() {
-        let mut process = create_test_instance();
+        let mut process = create_test_server_state();
 
         // First register a publisher at a deeper path "parent/child"
-        let child_result =
-            process.register_publisher("child_publisher".to_string(), "parent/child".to_string());
+        let child_result = process.register_publisher(
+            "child_publisher".to_string(),
+            "parent/child".to_string(),
+            default_test_connection(),
+        );
         assert!(
             child_result.is_ok(),
             "Should successfully register publisher at 'parent/child'"
@@ -149,8 +162,11 @@ mod tests {
         // Now try to register a publisher at "parent" - this should fail
         // because "parent" already exists as a directory in the tree (created during child registration)
         // Publishers can only be registered at new paths, not existing directory nodes
-        let parent_result =
-            process.register_publisher("parent_publisher".to_string(), "parent".to_string());
+        let parent_result = process.register_publisher(
+            "parent_publisher".to_string(),
+            "parent".to_string(),
+            test_connection(8082),
+        );
         assert!(
             parent_result.is_err(),
             "Should fail to register at path that already exists as directory"
@@ -165,15 +181,17 @@ mod tests {
 
     #[test]
     fn publisher_register_fail_existing_directory() {
-        let mut process = create_test_instance();
-        // Publisher created during registration
+        let mut process = create_test_server_state();
 
         // Try to register at paths that already exist in the initial tree structure
         // These should fail because they're already directory nodes
 
         // Try to register at "api" - should fail
-        let api_result =
-            process.register_publisher("test_publisher".to_string(), "api".to_string());
+        let api_result = process.register_publisher(
+            "test_publisher".to_string(),
+            "api".to_string(),
+            default_test_connection(),
+        );
         assert!(
             api_result.is_err(),
             "Should fail to register at existing directory 'api'"
@@ -186,8 +204,11 @@ mod tests {
         );
 
         // Try to register at "api/v1" - should fail
-        let api_v1_result =
-            process.register_publisher("test_publisher2".to_string(), "api/v1".to_string());
+        let api_v1_result = process.register_publisher(
+            "test_publisher2".to_string(),
+            "api/v1".to_string(),
+            test_connection(8082),
+        );
         assert!(
             api_v1_result.is_err(),
             "Should fail to register at existing directory 'api/v1'"
@@ -200,8 +221,11 @@ mod tests {
         );
 
         // Try to register at "api/v1/users" - should fail
-        let users_result =
-            process.register_publisher("test_publisher3".to_string(), "api/v1/users".to_string());
+        let users_result = process.register_publisher(
+            "test_publisher3".to_string(),
+            "api/v1/users".to_string(),
+            test_connection(8083),
+        );
         assert!(
             users_result.is_err(),
             "Should fail to register at existing directory 'api/v1/users'"
@@ -216,14 +240,16 @@ mod tests {
 
     #[tokio::test]
     async fn empty_path_validation() {
-        let mut process = create_test_instance();
-        // Publisher created during registration
+        let mut process = create_test_server_state();
 
         // Test that all operations reject empty paths
 
         // Register with empty path
-        let register_result =
-            process.register_publisher("test_publisher".to_string(), "".to_string());
+        let register_result = process.register_publisher(
+            "test_publisher".to_string(),
+            "".to_string(),
+            default_test_connection(),
+        );
         assert!(register_result.is_err());
         assert!(register_result.unwrap_err().contains("cannot be empty"));
 

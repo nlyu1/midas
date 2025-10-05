@@ -49,21 +49,19 @@ impl PingServer {
                     tokio::spawn(async move {
                         if let Ok(ws_stream) = accept_async(stream).await {
                             let (mut write, mut read) = ws_stream.split();
-                            // Wait for ping request
                             while let Some(msg) = read.next().await {
-                                if let Ok(Message::Text(text)) = msg {
-                                    if text == "ping" {
-                                        let response = {
-                                            let p = payload.read().unwrap();
-                                            PingResponse {
-                                                vec_payload: p.vec_payload.clone(),
-                                                str_payload: p.str_payload.clone(),
-                                                timestamp: Utc::now(),
-                                            }
-                                        };
-                                        if let Ok(json) = serde_json::to_string(&response) {
-                                            let _ = write.send(Message::Text(json.into())).await;
+                                if let Ok(Message::Text(text)) = msg
+                                    && text == "ping" {
+                                    let response = {
+                                        let p = payload.read().unwrap();
+                                        PingResponse {
+                                            vec_payload: p.vec_payload.clone(),
+                                            str_payload: p.str_payload.clone(),
+                                            timestamp: Utc::now(),
                                         }
+                                    };
+                                    if let Ok(json) = serde_json::to_string(&response) {
+                                        let _ = write.send(Message::Text(json.into())).await;
                                     }
                                 }
                             }

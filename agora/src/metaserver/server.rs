@@ -128,12 +128,10 @@ impl AgoraMetaServer {
 
 impl Drop for AgoraMetaServer {
     fn drop(&mut self) {
-        // Only cleanup if this is the last reference
-        if Arc::strong_count(&self.bg_handle) == 1 {
-            if let Ok(handle_guard) = self.bg_handle.try_lock() {
-                handle_guard.abort();
-                println!("Background pruning task stopped");
-            }
+        if Arc::strong_count(&self.bg_handle) == 1
+            && let Ok(handle_guard) = self.bg_handle.try_lock() {
+            handle_guard.abort();
+            println!("Background pruning task stopped");
         }
     }
 }

@@ -16,7 +16,7 @@ impl ConnectionHandle {
     }
 
     pub fn addr(&self) -> IpAddr {
-        self.addr.clone()
+        self.addr
     }
 
     pub fn port(&self) -> u16 {

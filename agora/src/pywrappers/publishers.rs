@@ -41,10 +41,10 @@ macro_rules! create_typed_publisher {
             }
 
             fn publish(&mut self, value: $type) -> PyResult<()> {
-                Ok(self
+                self
                     .rt
                     .block_on(self.inner.publish(value))
-                    .map_err(|e| PyRuntimeError::new_err(e))?)
+                    .map_err(|e| PyRuntimeError::new_err(e))
             }
         }
     };

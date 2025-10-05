@@ -88,7 +88,7 @@ impl PyOmniSubscriber {
                 path,
                 metaserver_connection.to_connection_handle(),
             ))
-            .map_err(|e| PyRuntimeError::new_err(e))?;
+            .map_err(PyRuntimeError::new_err)?;
 
         Ok(Self { inner, rt })
     }
@@ -97,7 +97,7 @@ impl PyOmniSubscriber {
         let result = self
             .rt
             .block_on(self.inner.get())
-            .map_err(|e| PyRuntimeError::new_err(e))?;
+            .map_err(PyRuntimeError::new_err)?;
 
         Ok(result)
     }
@@ -106,7 +106,7 @@ impl PyOmniSubscriber {
         let (_current_value, stream) = self
             .rt
             .block_on(self.inner.get_stream())
-            .map_err(|e| PyRuntimeError::new_err(e))?;
+            .map_err(PyRuntimeError::new_err)?;
 
         let rt_handle = self.rt.handle().clone();
         let iterator = stream_to_iter(stream, rt_handle);
