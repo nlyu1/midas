@@ -138,13 +138,13 @@ If you prefer manual configuration:
 2. **Find your network interface:**
    ```bash
    ip link show
-   # Look for your WiFi interface (typically wlp7s0, wlp3s0, etc.)
+   # Look for your WiFi / ethernet interface (typically wlp7s0, wlp3s0, etc.)
    ```
 
 3. **Configure the ULA subnet:**
    ```bash
    # Replace wlp7s0 with your interface name
-   sudo ip -6 addr add fde5:402f:ab0a:1::/64 dev wlp7s0
+   sudo ip -6 addr add fde5:402f:ab0a:1::3/64 dev wlp7s0
    ```
 
 ### Address Allocation
@@ -396,3 +396,6 @@ This approach gives you thorough integration testing while leveraging your exist
 architecture and minimizing additional complexity. The key is creating lightweight test
 fixtures that manage component lifecycles and using your address manager for network
 isolation.
+
+#### Checking that metaserver is actually running: 
+`ss -6 -tlnp | grep 8080`

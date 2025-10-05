@@ -14,6 +14,9 @@ struct Cli {
     /// Port for the metaserver
     #[arg(short, long, default_value_t = METASERVER_DEFAULT_PORT)]
     port: u16,
+
+    #[arg(short, long, default_value = "::1")]
+    address: Ipv6Addr,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,7 +44,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             This example demonstrates publishing messages to an Agora path.
         "}
     );
-    println!("Make sure the metaserver is running on port {}!\n", cli.port);
+    println!(
+        "Make sure the metaserver is running on port {}!\n",
+        cli.port
+    );
 
     // Get publisher configuration from user
     print!("Enter publisher name: ");
@@ -76,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         name.clone(),
         path.clone(),
         initial_message,
-        Ipv6Addr::LOCALHOST,
+        cli.address,
         cli.port,
     )
     .await

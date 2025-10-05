@@ -1,0 +1,6 @@
+proxy enp6s0 {
+      rule fde5:402f:ab0a:1::/64 {
+          auto
+      }
+  }
+
