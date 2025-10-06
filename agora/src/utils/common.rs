@@ -1,6 +1,7 @@
 use local_ip_address::local_ip;
 use std::fmt::{Display, Formatter};
 use std::net::IpAddr;
+use crate::{agora_error, agora_error_cause};
 
 #[derive(serde::Deserialize, serde::Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct ConnectionHandle {
@@ -9,6 +10,23 @@ pub struct ConnectionHandle {
 }
 
 pub type OrError<T> = Result<T, String>;
+
+/// Creates standardized Agora error message
+#[macro_export]
+macro_rules! agora_error {
+    ($component:expr, $method:expr, $msg:expr) => {
+        format!("Agora {} Error: {}", concat!($component, "::", $method), $msg)
+    };
+}
+
+/// Creates error with cause chain
+#[macro_export]
+macro_rules! agora_error_cause {
+    ($component:expr, $method:expr, $msg:expr, $cause:expr) => {
+        format!("Agora {} Error: {}\nCaused by: {}",
+            concat!($component, "::", $method), $msg, $cause)
+    };
+}
 
 impl ConnectionHandle {
     pub fn new(addr: IpAddr, port: u16) -> Self {
@@ -25,7 +43,7 @@ impl ConnectionHandle {
 
     pub fn new_local(port: u16) -> OrError<Self> {
         let addr =
-            local_ip().map_err(|e| format!("ConnectionHandle initialization error: {}", e))?;
+            local_ip().map_err(|e| agora_error_cause!("utils::ConnectionHandle", "new_local", "failed to get local IP", e))?;
         Ok(Self { addr, port })
     }
 
@@ -53,25 +71,21 @@ impl Display for ConnectionHandle {
 /// - No directory traversal (..)
 pub fn strip_and_verify(path_string: &str) -> OrError<String> {
     if path_string.is_empty() {
-        return Err("Path cannot be empty".to_string());
+        return Err(agora_error!("utils", "strip_and_verify", "path cannot be empty"));
     }
-    // Strip leading and trailing slashes
     let stripped = path_string.trim_matches('/');
     if stripped.is_empty() {
-        return Err("Path cannot be empty after stripping slashes".to_string());
+        return Err(agora_error!("utils", "strip_and_verify", "path cannot be empty after stripping slashes"));
     }
-    // Check for double slashes
     if stripped.contains("//") {
-        return Err("Path cannot contain double slashes".to_string());
+        return Err(agora_error!("utils", "strip_and_verify", "path cannot contain double slashes"));
     }
-    // Check for directory traversal
     if stripped.contains("..") {
-        return Err("Path cannot contain '..' (directory traversal)".to_string());
+        return Err(agora_error!("utils", "strip_and_verify", "path cannot contain '..' (directory traversal)"));
     }
-    // Validate characters: only alphanumeric, dash, underscore, and slash
     for c in stripped.chars() {
         if !c.is_alphanumeric() && c != '-' && c != '_' && c != '/' {
-            return Err(format!("Path contains invalid character: '{}'", c));
+            return Err(agora_error!("utils", "strip_and_verify", &format!("path contains invalid character: '{}'", c)));
         }
     }
 
@@ -81,20 +95,14 @@ pub fn strip_and_verify(path_string: &str) -> OrError<String> {
 pub fn prepare_socket_path(socket_path: &str) -> OrError<()> {
     let path = std::path::Path::new(socket_path);
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            format!(
-                "Agora socket preparation error. Failed to create parent: {}",
-                e
-            )
-        })?;
+        std::fs::create_dir_all(parent).map_err(|e|
+            agora_error_cause!("utils", "prepare_socket_path", "failed to create parent directory", e)
+        )?;
     }
     if path.exists() {
-        std::fs::remove_file(path).map_err(|e| {
-            format!(
-                "Agora socket preparation error. Failed to delete existing socket file: {}",
-                e
-            )
-        })?;
+        std::fs::remove_file(path).map_err(|e|
+            agora_error_cause!("utils", "prepare_socket_path", "failed to remove existing socket file", e)
+        )?;
     }
     Ok(())
 }

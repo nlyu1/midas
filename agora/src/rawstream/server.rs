@@ -1,4 +1,5 @@
 use crate::utils::{OrError, prepare_socket_path};
+use crate::{agora_error, agora_error_cause};
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::UnixListener;
 use tokio::sync::broadcast;
@@ -21,33 +22,35 @@ where
     T: Clone + Send + 'static + Into<Vec<u8>> + TryFrom<Vec<u8>>,
     <T as TryFrom<Vec<u8>>>::Error: std::fmt::Display,
 {
+    /// Creates UDS WebSocket server with broadcast to multiple clients.
+    /// Architecture: Two async tasks share broadcast channel for 1-to-N fanout.
+    /// Error: Socket bind fails → propagates to Publisher::new.
+    /// Called by: Publisher::new
     pub async fn new(socket_path: &str, buffer_size: Option<usize>) -> OrError<Self> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
         // Create parent directory and clean up existing socket
         prepare_socket_path(socket_path)?;
 
-        // Bind Unix domain socket listener at the specified path
-        let listener = UnixListener::bind(socket_path).map_err(|e| {
-            format!(
-                "Failed to bind Unix socket {}: {}",
-                socket_path,
-                e
-            )
-        })?;
-        // Create broadcast channel to fan out input_stream to all clients
+        // Bind Unix domain socket listener
+        let listener = UnixListener::bind(socket_path).map_err(|e|
+            agora_error_cause!("rawstream::RawStreamServer", "new",
+                &format!("failed to bind Unix socket at {}", socket_path), e)
+        )?;
+        // Create broadcast channel to fan out to all connected clients
         let buffer_capacity = buffer_size.unwrap_or(4096);
         let (broadcast_tx, _) = broadcast::channel::<T>(buffer_capacity);
-        // Convert receiver to stream for ingestion
         let mut input_stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
-        // Task 1: Ingestion - pull data from input_stream and broadcast it
+
+        // Task 1: Ingestion - receives data from publish() → broadcasts to all clients
         let ingest_tx = broadcast_tx.clone();
         let ingest_handle = tokio::spawn(async move {
             while let Some(data) = input_stream.next().await {
-                let _ = ingest_tx.send(data); // Ignore error if no clients
+                let _ = ingest_tx.send(data); // Ignore error if no clients listening
             }
         });
-        // Task 2: Connection handling - accept new clients and serve them
+
+        // Task 2: Connection handling - accepts new clients and spawns per-client tasks
         let connection_handle = tokio::spawn(async move {
             loop {
                 if let Ok((unix_stream, _)) = listener.accept().await {
@@ -55,14 +58,15 @@ where
                     tokio::spawn(async move {
                         if let Ok(ws_stream) = accept_async(unix_stream).await {
                             let (mut ws_sender, _) = ws_stream.split();
-                            // Forward broadcast messages to this client
+                            // Forward broadcast messages to this specific client
                             while let Ok(data) = client_rx.recv().await {
                                 if ws_sender
                                     .send(Message::Binary(data.into().into()))
                                     .await
                                     .is_err()
                                 {
-                                    break; // Client disconnected
+                                    // Client disconnected - this task exits, others unaffected
+                                    break;
                                 }
                             }
                         }
@@ -82,7 +86,7 @@ where
     pub fn publish(&self, value: T) -> OrError<()> {
         self.sender
             .send(value)
-            .map_err(|_| "Channel closed".to_string())
+            .map_err(|_| agora_error!("rawstream::RawStreamServer", "publish", "channel closed"))
     }
 }
 

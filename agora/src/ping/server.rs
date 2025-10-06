@@ -1,5 +1,6 @@
 use super::PingResponse;
 use crate::utils::{OrError, prepare_socket_path};
+use crate::agora_error_cause;
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use std::sync::{Arc, RwLock};
@@ -20,21 +21,22 @@ pub struct PingServer {
 }
 
 impl PingServer {
+    /// Creates UDS WebSocket server for ping-pong protocol.
+    /// Responds to "ping" text messages with JSON containing current value and timestamp.
+    /// Error: Socket bind fails → propagates to Publisher::new.
+    /// Called by: Publisher::new
     pub async fn new(
         agora_path: &str,
         vec_payload: Vec<u8>,
         str_payload: String,
     ) -> OrError<Self> {
         let socket_path = format!("/tmp/agora/{}/ping.sock", agora_path);
-        // Create parent directory
         prepare_socket_path(&socket_path)?;
-        // Bind UDS
-        let listener = UnixListener::bind(&socket_path).map_err(|e| {
-            format!(
-                "Agora PingServer creation error: cannot bind to socket {:?}. {}",
-                socket_path, e
-            )
-        })?;
+
+        let listener = UnixListener::bind(&socket_path).map_err(|e|
+            agora_error_cause!("ping::PingServer", "new",
+                &format!("failed to bind socket at {}", socket_path), e)
+        )?;
 
         let payload = Arc::new(RwLock::new(Payload {
             vec_payload,
@@ -42,6 +44,7 @@ impl PingServer {
         }));
         let shared_payload = payload.clone();
 
+        // Background task: accept connections and respond to pings
         let bg_handle = tokio::spawn(async move {
             loop {
                 if let Ok((stream, _)) = listener.accept().await {
@@ -50,6 +53,7 @@ impl PingServer {
                         if let Ok(ws_stream) = accept_async(stream).await {
                             let (mut write, mut read) = ws_stream.split();
                             while let Some(msg) = read.next().await {
+                                // Protocol: receive "ping" → send JSON response
                                 if let Ok(Message::Text(text)) = msg
                                     && text == "ping" {
                                     let response = {
@@ -78,6 +82,7 @@ impl PingServer {
         })
     }
 
+    /// Updates current payload under RwLock. Called by Publisher::publish().
     pub fn update_payload(&mut self, vec_payload: Vec<u8>, str_payload: String) {
         let mut payload = self.payload.write().unwrap();
         payload.vec_payload = vec_payload;

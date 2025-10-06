@@ -13,11 +13,15 @@ pub struct Gateway {
 }
 
 impl Gateway {
+    /// Creates TCP WebSocket gateway that proxies to local UDS endpoints.
+    /// Network: Listens on TCP, accepts WebSocket connections, proxies to UDS.
+    /// URL routing: /rawstream/{path} or /ping/{path} → /tmp/agora/{path}/{service}.sock
+    /// Error: Bind fails → propagates to caller. Connection errors logged per-connection.
+    /// Called by: User code (main gateway process)
     pub async fn new(port: u16) -> OrError<Self> {
         let ip = local_ip().map_err(|e| format!("Agora Gateway error: cannot get own ip {}", e))?;
         let connection = ConnectionHandle::new(ip, port);
 
-        // Bind TCP listener
         let addr = std::net::SocketAddr::new(ip, port);
         let listener = TcpListener::bind(&addr)
             .await
@@ -25,7 +29,7 @@ impl Gateway {
 
         eprintln!("Agora Gateway listening on {}", addr);
 
-        // Spawn accept loop
+        // Accept loop: spawn per-connection handler tasks
         let task_handle = tokio::spawn(async move {
             loop {
                 match listener.accept().await {
@@ -54,26 +58,29 @@ impl Gateway {
     }
 }
 
+// Handles single gateway connection: TCP WS ↔ UDS WS bidirectional proxy.
+// URL routing determines UDS target, then forwards all messages in both directions.
 async fn handle_connection(tcp_stream: tokio::net::TcpStream) -> OrError<()> {
     let mut agora_path = String::new();
     let mut service_type = String::new();
 
-    // Accept WebSocket with custom header callback to extract path
+    // Accept WebSocket, extract path from URL during handshake
     let ws_stream = accept_hdr_async(tcp_stream, |req: &Request, response: Response| {
         let path = req.uri().path();
-        // Path parsing:
-        // /rawstream/{path} → /tmp/agora/{path}/rawstream.sock
-        // /ping/{path} → /tmp/agora/{path}/ping.sock
 
+        // URL routing: map external path to UDS socket path
         if let Some(stripped) = path.strip_prefix("/rawstream/") {
+            // /rawstream/{path} → /tmp/agora/{path}/rawstream.sock
             agora_path = stripped.to_string();
             service_type = "rawstream".to_string();
             Ok(response)
         } else if let Some(stripped) = path.strip_prefix("/ping/") {
+            // /ping/{path} → /tmp/agora/{path}/ping.sock
             agora_path = stripped.to_string();
             service_type = "ping".to_string();
             Ok(response)
         } else {
+            // Invalid URL - reject with 400
             eprintln!("Gateway: invalid path format: {}", path);
             Err(tokio_tungstenite::tungstenite::http::Response::builder()
                 .status(400)
@@ -88,49 +95,53 @@ async fn handle_connection(tcp_stream: tokio::net::TcpStream) -> OrError<()> {
         return Err("Failed to extract path from request".to_string());
     }
 
-    // Connect to UDS at /tmp/agora/{path}/{service}.sock
+    // Connect to local UDS endpoint
     let uds_path = format!("/tmp/agora/{}/{}.sock", agora_path, service_type);
     let unix_stream = UnixStream::connect(&uds_path)
         .await
         .map_err(|e| format!("Failed to connect to UDS {}: {}", uds_path, e))?;
 
-    // Upgrade UDS connection to WebSocket
+    // Upgrade UDS to WebSocket
     let (uds_ws_stream, _) = client_async("ws://localhost/", unix_stream)
         .await
         .map_err(|e| format!("Failed to upgrade UDS to WebSocket: {}", e))?;
 
-    // Split both streams
+    // Split both WebSocket streams for bidirectional forwarding
     let (mut ext_write, mut ext_read) = ws_stream.split();
     let (mut int_write, mut int_read) = uds_ws_stream.split();
 
-    // Bidirectional forwarding
+    // Task 1: External → Internal forwarding
     let ext_to_int = tokio::spawn(async move {
         while let Some(msg) = ext_read.next().await {
             match msg {
                 Ok(msg) => {
                     if int_write.send(msg).await.is_err() {
-                        break;
+                        break; // UDS disconnected
                     }
                 }
-                Err(_) => break,
+                Err(_) => break, // External connection error
             }
         }
     });
 
+    // Task 2: Internal → External forwarding
     let int_to_ext = tokio::spawn(async move {
         while let Some(msg) = int_read.next().await {
             match msg {
                 Ok(msg) => {
                     if ext_write.send(msg).await.is_err() {
-                        break;
+                        break; // External disconnected
                     }
                 }
-                Err(_) => break,
+                // UDS error
+                Err(_) => {
+                    break;
+                }
             }
         }
     });
 
-    // Wait for either direction to complete
+    // Wait for either direction to close - then terminate both
     tokio::select! {
         _ = ext_to_int => {},
         _ = int_to_ext => {},

@@ -26,6 +26,10 @@ where
         let timestamp = Utc::now().format("%H:%M:%S");
         eprintln!("RawStreamClient error {}: {}", timestamp, message);
     }
+    /// Creates WebSocket client with auto-reconnect to publisher's gateway.
+    /// Network: Connects via gateway proxy: ws://host:port/rawstream/{path} → /tmp/agora/{path}/rawstream.sock
+    /// Errors never propagate after creation - client retries connection every 100ms indefinitely.
+    /// Called by: Subscriber::new, OmniSubscriber::new
     pub fn new(
         host_gateway: ConnectionHandle,
         socket_path: &str,
@@ -36,8 +40,7 @@ where
         let buffer_capacity = buffer_size.unwrap_or(4096);
         let (tx, rx) = broadcast::channel::<T>(buffer_capacity);
 
-        // Construct WebSocket URL: ws://host:port/rawstream/{path}
-        // Gateway will map this to /tmp/agora/{path}/rawstream.sock
+        // Construct WebSocket URL that gateway will proxy to UDS
         let addr_string = format!(
             "ws://{}/rawstream/{}",
             host_gateway,
@@ -47,26 +50,25 @@ where
         // Spawn background task for connection handling
         let bg_handle = tokio::spawn(async move {
             loop {
-                // Main reconnection loop - runs indefinitely
+                // Outer loop: Connection retry - runs forever
                 match connect_async(&addr_string).await {
-                    // Branch: Try to establish WebSocket connection
                     Ok((ws_stream, _)) => {
-                        // SUCCESS: WebSocket connection established
+                        // Connected: enter message processing loop
                         let (_, mut ws_receiver) = ws_stream.split();
                         loop {
-                            // Message processing loop - runs until connection drops
+                            // Inner loop: Message processing - runs until disconnect
                             match ws_receiver.next().await {
-                                // Branch: Wait for next message from WebSocket
                                 Some(Ok(Message::Binary(data))) => {
+                                    // Expected case: binary message with serialized data
                                     match T::try_from(data.to_vec()) {
                                         Ok(converted) => {
                                             if tx.send(converted).is_err() {
                                                 Self::log_error("broadcast channel closed");
-                                                return; // Exit task
+                                                return; // All subscribers dropped, exit task
                                             }
                                         }
-                                        // ERROR: Invalid data for type T (e.g., invalid UTF-8 for String)
                                         Err(conversion_err) => {
+                                            // Type conversion failed (e.g., invalid UTF-8 for String)
                                             Self::log_error(&format!(
                                                 "invalid message data: {}",
                                                 conversion_err
@@ -75,12 +77,14 @@ where
                                     }
                                 }
                                 Some(Ok(msg)) => {
+                                    // Unexpected: non-binary message (e.g., text, ping, pong)
                                     Self::log_error(&format!(
                                         "received non-binary message from WebSocket: {:?}",
                                         msg
                                     ));
                                 }
                                 Some(Err(ws_error)) => {
+                                    // WebSocket protocol error → break to reconnect
                                     Self::log_error(&format!(
                                         "WebSocket protocol error: {}",
                                         ws_error
@@ -88,6 +92,7 @@ where
                                     break;
                                 }
                                 None => {
+                                    // Connection closed by server → break to reconnect
                                     Self::log_error("connection closed by server");
                                     break;
                                 }
@@ -95,6 +100,7 @@ where
                         }
                     }
                     Err(connect_error) => {
+                        // Connection failed (server down, network issue, etc.)
                         Self::log_error(&format!(
                             "failed to connect to {}: {}",
                             addr_string, connect_error
@@ -115,8 +121,8 @@ where
         })
     }
 
-    /// Creates a new independent stream of messages from this client.
-    /// Multiple subscribers can consume the same messages independently.
+    /// Creates independent stream for consuming messages.
+    /// Multiple subscribers can call this to get separate streams of the same data.
     pub fn subscribe(&self) -> BroadcastStream<T> {
         BroadcastStream::new(self.receiver.resubscribe())
     }

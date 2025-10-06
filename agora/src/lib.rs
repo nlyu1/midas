@@ -1,3 +1,8 @@
+// Re-export error macros at crate root
+#[macro_use]
+pub mod utils;
+pub use utils::ConnectionHandle;
+
 pub mod constants;
 mod core;
 pub mod metaserver;
@@ -6,8 +11,6 @@ mod pywrappers;
 pub mod rawstream;
 mod relay;
 pub use relay::Relay;
-pub mod utils;
-pub use utils::ConnectionHandle;
 
 pub mod gateway;
 

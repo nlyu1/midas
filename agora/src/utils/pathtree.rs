@@ -1,4 +1,5 @@
 use crate::utils::OrError;
+use crate::agora_error;
 use std::fmt;
 use std::sync::{Arc, Weak, Mutex};
 
@@ -31,8 +32,9 @@ pub trait TreeTrait {
 }
 
 impl TreeTrait for TreeNode {
+    /// Creates a new tree node with the given name.
+    /// Panics if name contains '/' (use paths for hierarchy instead).
     fn new(name: &str) -> Arc<Self> {
-        // assert that name does not contain slashes
         assert!(!name.contains('/'), "TreeNode name cannot contain slashes");
         Arc::new(TreeNode {
             name: name.into(),
@@ -56,8 +58,10 @@ impl TreeTrait for TreeNode {
         self.children.lock().unwrap().push(child);
     }
 
+    /// Traverses tree by slash-separated path (e.g., "a/b/c").
+    /// Returns the target node if found.
+    /// Error: Child not found at any level → propagates to ServerState methods.
     fn get_child(self: &Arc<Self>, path: &str) -> OrError<TreeNodeRef> {
-        // Same as "get_child", except might be recursive child1/child2/...
         if path.is_empty() {
             return Ok(self.clone());
         }
@@ -82,17 +86,18 @@ impl TreeTrait for TreeNode {
         child.parent()?.remove_immediate_child(child_name)
     }
 
-    // Removes entire branch of a leaf node
-    // Asserts that child is leaf, and removes until the first branch
+    /// Removes leaf node and all ancestors up to first branching point (node with >1 child).
+    /// Used by ServerState to clean up publisher paths when they're removed.
+    /// Error: Target is root or has children → returns error to ServerState::remove_publisher.
     fn remove_child_and_branch(self: &TreeNodeRef, path: &str) -> OrError<()> {
         let child = self.get_child(path)?;
         if child.is_root() {
-            return Err("Cannot remove root node".to_string());
+            return Err(agora_error!("utils::TreeNode", "remove_child_and_branch", "cannot remove root node"));
         }
         if !child.is_leaf() {
-            return Err("Cannot remove non-leaf node".to_string());
+            return Err(agora_error!("utils::TreeNode", "remove_child_and_branch", "cannot remove non-leaf node"));
         }
-        // Returns the closest-to-root node that has more than one child, as well as name of the branch
+        // Find branching point: walk up until node with >1 children
         let (branching_ancestor, branch_name) = child.branching_ancestor()?;
         branching_ancestor.remove_immediate_child(&branch_name)?;
         Ok(())
@@ -101,7 +106,7 @@ impl TreeTrait for TreeNode {
     fn parent(&self) -> OrError<TreeNodeRef> {
         match self.parent.lock().unwrap().as_ref() {
             Some(parent) => Ok(parent.upgrade().unwrap()),
-            None => Err(format!("Parent not found for '{}'", self.name)),
+            None => Err(agora_error!("utils::TreeNode", "parent", &format!("parent not found for '{}'", self.name))),
         }
     }
 
@@ -145,6 +150,8 @@ impl TreeTrait for TreeNode {
         self.to_repr_helper()
     }
 
+    /// Deserializes tree from custom JSON-like format: "leaf" or {"parent":[children...]}.
+    /// Error: Invalid format → propagates to AgoraClient::get_path_tree caller.
     fn from_repr(repr: &str) -> OrError<TreeNodeRef> {
         TreeNode::from_repr_helper(repr)
     }
@@ -185,33 +192,26 @@ impl TreeNode {
     }
 
     fn get_immediate_child(self: &Arc<Self>, name: &str) -> OrError<TreeNodeRef> {
-        // Returns child if exists. Note that modifying child will modify original tree.
-        // Change type annotation as necessary to complete this functionality.
         self.children
             .lock().unwrap()
             .iter()
             .find(|child| child.name == name)
             .cloned()
             .ok_or_else(|| {
-                format!(
-                    "Cannot get immediate child: '{}' not found under '{}'",
-                    name, self.name
-                )
+                agora_error!("utils::TreeNode", "get_immediate_child",
+                    &format!("child '{}' not found under '{}'", name, self.name))
             })
     }
 
     fn remove_immediate_child(self: &TreeNodeRef, name: &str) -> OrError<()> {
-        // Look for "name" if exists and deletes; frees correctly. Else complains [name] not found under [self.path]
         let mut children = self.children.lock().unwrap();
         let initial_len = children.len();
 
         children.retain(|child| child.name != name);
 
         if children.len() == initial_len {
-            Err(format!(
-                "Cannot remove immediate child: '{}' not found under '{}'",
-                name, self.name
-            ))
+            Err(agora_error!("utils::TreeNode", "remove_immediate_child",
+                &format!("child '{}' not found under '{}'", name, self.name)))
         } else {
             Ok(())
         }
@@ -252,41 +252,40 @@ impl TreeNode {
     }
 
     fn from_repr_helper(repr: &str) -> OrError<TreeNodeRef> {
-        // Simple parser for our custom format
         let repr = repr.trim();
 
-        // Handle leaf node case: just a quoted string
+        // Branch 1: Leaf node - just a quoted string "name"
         if repr.starts_with('"') && repr.ends_with('"') && !repr.contains('[') {
-            let name = &repr[1..repr.len() - 1]; // Remove quotes
+            let name = &repr[1..repr.len() - 1];
             return Ok(TreeNode::new(name));
         }
 
-        // Handle parent node case: {"name":[children...]}
+        // Branch 2: Parent node - {"name":[children...]}
         if !repr.starts_with('{') || !repr.ends_with('}') {
-            return Err(format!(
-                "Invalid format: expected {{...}} or \"...\", got: {}",
-                repr
-            ));
+            return Err(agora_error!("utils::TreeNode", "from_repr",
+                &format!("invalid format: expected {{...}} or \"...\", got: {}", repr)));
         }
 
-        let inner = &repr[1..repr.len() - 1]; // Remove outer braces
+        let inner = &repr[1..repr.len() - 1];
 
-        // Find the name (quoted string before the colon)
+        // Parse: name (before ':') and children array (after ':')
         if let Some(colon_pos) = inner.find(':') {
             let name_part = inner[..colon_pos].trim();
             if !name_part.starts_with('"') || !name_part.ends_with('"') {
-                return Err(format!("Invalid name format: {}", name_part));
+                return Err(agora_error!("utils::TreeNode", "from_repr",
+                    &format!("invalid name format: {}", name_part)));
             }
-            let name = &name_part[1..name_part.len() - 1]; // Remove quotes
+            let name = &name_part[1..name_part.len() - 1];
 
             let children_part = inner[colon_pos + 1..].trim();
             if !children_part.starts_with('[') || !children_part.ends_with(']') {
-                return Err(format!("Invalid children format: {}", children_part));
+                return Err(agora_error!("utils::TreeNode", "from_repr",
+                    &format!("invalid children format: {}", children_part)));
             }
 
             let node = TreeNode::new(name);
 
-            // Parse children array
+            // Recursively parse children array
             let children_inner = &children_part[1..children_part.len() - 1].trim();
             if !children_inner.is_empty() {
                 let child_reprs = TreeNode::split_repr_array(children_inner)?;
@@ -298,12 +297,14 @@ impl TreeNode {
 
             Ok(node)
         } else {
-            Err(format!("Invalid format: no colon found in {}", inner))
+            Err(agora_error!("utils::TreeNode", "from_repr",
+                &format!("invalid format: no colon found in {}", inner)))
         }
     }
 
+    // Splits comma-separated array respecting nesting depth and quotes.
+    // Only splits on commas at depth=0 (outside all braces/brackets and quotes).
     fn split_repr_array(s: &str) -> OrError<Vec<String>> {
-        // Simple array splitter that respects nesting
         let mut result = Vec::new();
         let mut current = String::new();
         let mut depth = 0;
@@ -335,6 +336,7 @@ impl TreeNode {
                     current.push(ch);
                 }
                 ',' if !in_quotes && depth == 0 => {
+                    // Split point: top-level comma outside quotes
                     result.push(current.trim().to_string());
                     current.clear();
                 }
