@@ -6,6 +6,9 @@ use crate::utils::{TreeNode, TreeNodeRef, TreeTrait};
 use crate::agora_error_cause;
 use tarpc::{client, context, tokio_serde::formats::Json};
 
+/// TARPC client for metaserver RPC communication (service discovery and publisher lifecycle).
+/// Maintains persistent TCP connection to metaserver, provides high-level API over `AgoraMetaClient`.
+/// Used by: `Publisher`, `Subscriber`, `OmniSubscriber`, `Relay` for registration/query operations.
 pub struct AgoraClient {
     metaserver_connection: ConnectionHandle,
     client: AgoraMetaClient,
@@ -13,8 +16,8 @@ pub struct AgoraClient {
 
 impl AgoraClient {
     /// Creates TARPC client with persistent TCP connection to metaserver.
-    /// Error: Connection fails → propagates to Publisher::new, Subscriber::new, Relay::new.
-    /// Called by: Publisher::new, Subscriber::new, OmniSubscriber::new, Relay::swapon
+    /// Error: Connection fails → propagates to `Publisher::new`, `Subscriber::new`, `Relay::new`.
+    /// Called by: `Publisher::new`, `Subscriber::new`, `OmniSubscriber::new`, `Relay::swapon`
     pub async fn new(metaserver_connection: ConnectionHandle) -> OrError<Self> {
         let mut transport =
             tarpc::serde_transport::tcp::connect(metaserver_connection.addr_port(), Json::default);

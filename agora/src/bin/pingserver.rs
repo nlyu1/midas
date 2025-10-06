@@ -18,15 +18,15 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     println!(
-        "🚀 Starting Ping Server at UDS: /tmp/agora/{}/ping.sock",
+        "Starting Ping Server at UDS: /tmp/agora/{}/ping.sock",
         args.directory
     );
-    println!("📝 Type messages and press Enter to update the ping payload");
+    println!("Type messages and press Enter to update the ping payload");
     println!(
-        "🔌 Clients connect via gateway: ws://[gateway_host]:port/ping/{}",
+        "Clients connect via gateway: ws://[gateway_host]:port/ping/{}",
         args.directory
     );
-    println!("💡 Type 'quit' or 'exit' to stop the server\n");
+    println!("Type 'quit' or 'exit' to stop the server\n");
 
     // Create server with initial payload
     let initial_vec = args.initial_payload.as_bytes().to_vec();
@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!(e))?;
 
     println!("✅ Server started successfully!");
-    println!("📦 Initial payload: \"{}\"", args.initial_payload);
+    println!("Initial payload: \"{}\"", args.initial_payload);
 
     // Create stdin reader for input loop
     let stdin = tokio::io::stdin();
@@ -53,16 +53,16 @@ async fn main() -> anyhow::Result<()> {
                 if line.is_empty() {
                     continue; // Skip empty lines
                 } else if line == "quit" || line == "exit" {
-                    println!("👋 Shutting down server...");
+                    println!("Shutting down server...");
                     break;
                 } else {
                     let vec_payload = line.as_bytes().to_vec();
-                    println!("📡 Updating payload: \"{}\"", line);
+                    println!("Updating payload: \"{}\"", line);
                     server.update_payload(vec_payload, line);
                 }
             }
             Ok(None) | Err(_) => {
-                println!("📥 Input stream closed");
+                println!("Input stream closed");
                 break;
             }
         }

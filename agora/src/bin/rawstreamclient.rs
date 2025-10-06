@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let gateway = ConnectionHandle::new(address, args.port);
 
     println!(
-        "🔗 Connecting to Raw Stream via gateway at {}/rawstream/{}",
+        "Connecting to Raw Stream via gateway at {}/rawstream/{}",
         gateway,
         args.directory
     );
@@ -61,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
             }
         };
 
-    println!("📡 Listening for messages... (Press Ctrl+C to exit)\n");
+    println!("Listening for messages... (Press Ctrl+C to exit)\n");
 
     // Subscribe to the stream and listen for messages
     let mut stream = client.subscribe();
@@ -75,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
                     now.format("%M:%S"),
                     now.timestamp_subsec_micros() as f64 / 1000.0
                 );
-                println!("📨 Received: {}", message);
+                println!("Received: {}", message);
                 println!("    received at [{}]", received_timestamp);
             }
             Err(e) => {
@@ -85,6 +85,6 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    println!("🔌 Connection closed");
+    println!("Connection closed");
     Ok(())
 }

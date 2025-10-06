@@ -3,6 +3,9 @@ use crate::agora_error;
 use std::fmt;
 use std::sync::{Arc, Weak, Mutex};
 
+/// Hierarchical tree node for publisher path registry in metaserver.
+/// Thread-safe via `Arc`/`Weak` parent-child links and `Mutex`-protected children vector.
+/// Invariant: Publishers are leaves, all ancestors are directories. Supports path operations (add, remove, traverse).
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct TreeNode {
     name: String,
@@ -58,9 +61,9 @@ impl TreeTrait for TreeNode {
         self.children.lock().unwrap().push(child);
     }
 
-    /// Traverses tree by slash-separated path (e.g., "a/b/c").
+    /// Traverses tree by slash-separated path (e.g., `"a/b/c"`).
     /// Returns the target node if found.
-    /// Error: Child not found at any level → propagates to ServerState methods.
+    /// Error: Child not found at any level → propagates to `ServerState` methods.
     fn get_child(self: &Arc<Self>, path: &str) -> OrError<TreeNodeRef> {
         if path.is_empty() {
             return Ok(self.clone());
@@ -87,8 +90,8 @@ impl TreeTrait for TreeNode {
     }
 
     /// Removes leaf node and all ancestors up to first branching point (node with >1 child).
-    /// Used by ServerState to clean up publisher paths when they're removed.
-    /// Error: Target is root or has children → returns error to ServerState::remove_publisher.
+    /// Used by `ServerState` to clean up publisher paths when they're removed.
+    /// Error: Target is root or has children → returns error to `ServerState::remove_publisher`.
     fn remove_child_and_branch(self: &TreeNodeRef, path: &str) -> OrError<()> {
         let child = self.get_child(path)?;
         if child.is_root() {
@@ -150,8 +153,8 @@ impl TreeTrait for TreeNode {
         self.to_repr_helper()
     }
 
-    /// Deserializes tree from custom JSON-like format: "leaf" or {"parent":[children...]}.
-    /// Error: Invalid format → propagates to AgoraClient::get_path_tree caller.
+    /// Deserializes tree from custom JSON-like format: `"leaf"` or `{"parent":[children...]}`.
+    /// Error: Invalid format → propagates to `AgoraClient::get_path_tree` caller.
     fn from_repr(repr: &str) -> OrError<TreeNodeRef> {
         TreeNode::from_repr_helper(repr)
     }

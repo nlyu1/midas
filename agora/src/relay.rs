@@ -3,6 +3,10 @@ use crate::{Agorable, Publisher, Subscriber};
 use crate::{agora_error, agora_error_cause};
 use futures_util::StreamExt;
 
+/// Dynamic message router with fixed destination and switchable source.
+/// Architecture: Two async tasks (`stream_in`, `stream_out`) communicate via unbounded channel.
+/// Use case: Contiguous streaming from discontinuous sources, cross-metaserver bridging.
+/// Call `swapon()` to atomically switch source without dropping destination subscribers.
 pub struct Relay<T: Agorable> {
     stream_out: tokio::task::JoinHandle<()>,
     stream_in: Option<tokio::task::JoinHandle<()>>,
@@ -14,9 +18,9 @@ pub struct Relay<T: Agorable> {
 impl<T: Agorable> Relay<T> {
     /// Creates relay with fixed destination publisher and no source yet.
     /// Architecture: Two async tasks communicate via unbounded channel:
-    /// - stream_in: Subscribes to source → sends values to channel
-    /// - stream_out: Receives from channel → publishes to destination
-    /// Error: Publisher creation fails → propagates to user code.
+    /// - `stream_in`: Subscribes to source → sends values to channel
+    /// - `stream_out`: Receives from channel → publishes to destination
+    /// Error: `Publisher` creation fails → propagates to user code.
     /// Called by: User code
     pub async fn new(
         name: String,
@@ -57,9 +61,9 @@ impl<T: Agorable> Relay<T> {
         })
     }
 
-    /// Atomically switches source by aborting old stream_in task and spawning new subscriber.
+    /// Atomically switches source by aborting old `stream_in` task and spawning new subscriber.
     /// Enables seamless source switching for contiguous streams from discontinuous publishers.
-    /// Error: Subscriber creation fails → returns to caller, relay keeps old source.
+    /// Error: `Subscriber` creation fails → returns to caller, relay keeps old source.
     /// Called by: User code
     pub async fn swapon(
         &mut self,

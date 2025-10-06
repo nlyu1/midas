@@ -6,6 +6,8 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 
+/// UDS WebSocket server that broadcasts messages to N clients via `tokio::broadcast`.
+/// Two tasks: ingestion (receives from `publish()`) and connection handler (fans out to clients).
 pub struct RawStreamServer<T>
 where
     T: Clone + Send + 'static + Into<Vec<u8>> + TryFrom<Vec<u8>>,
@@ -24,8 +26,8 @@ where
 {
     /// Creates UDS WebSocket server with broadcast to multiple clients.
     /// Architecture: Two async tasks share broadcast channel for 1-to-N fanout.
-    /// Error: Socket bind fails → propagates to Publisher::new.
-    /// Called by: Publisher::new
+    /// Error: Socket bind fails → propagates to `Publisher::new`.
+    /// Called by: `Publisher::new`
     pub async fn new(socket_path: &str, buffer_size: Option<usize>) -> OrError<Self> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 

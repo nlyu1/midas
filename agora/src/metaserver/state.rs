@@ -5,7 +5,9 @@ use crate::utils::{OrError, TreeNode, TreeNodeRef, TreeTrait};
 use crate::{agora_error, agora_error_cause};
 use std::collections::HashMap;
 
-// Shared server state that will be accessed by all connections
+/// Shared metaserver state managing publisher registry, path tree hierarchy, and health checks.
+/// Three maps: `publishers` (all registered), `confirmed_publishers` (with active `PingClient`s), `path_tree` (hierarchical structure).
+/// Invariant: Publishers are leaves, all ancestors are pure directories. Protected by `RwLock` in `AgoraMetaServer`.
 #[derive(Debug)]
 pub struct ServerState {
     pub path_tree: TreeNodeRef,
@@ -34,8 +36,8 @@ impl ServerState {
 
     /// Registers publisher at path after validation.
     /// Validates: path format, not duplicate, parents are directories, path is new leaf.
-    /// Error: Validation fails → returns to AgoraClient RPC caller → Publisher::new.
-    /// Called by: AgoraMetaServer (TARPC handler) ← AgoraClient::register_publisher ← Publisher::new
+    /// Error: Validation fails → returns to `AgoraClient` RPC caller → `Publisher::new`.
+    /// Called by: `AgoraMetaServer` (TARPC handler) ← `AgoraClient::register_publisher` ← `Publisher::new`
     pub fn register_publisher(
         &mut self,
         name: String,
@@ -75,8 +77,8 @@ impl ServerState {
 
     /// Confirms publisher by creating ping client and testing connection.
     /// Auto-removes publisher from registry if ping fails.
-    /// Error: Not registered, already confirmed, or ping fails → returns to Publisher::new.
-    /// Called by: AgoraMetaServer (TARPC) ← AgoraClient::confirm_publisher ← Publisher::new
+    /// Error: Not registered, already confirmed, or ping fails → returns to `Publisher::new`.
+    /// Called by: `AgoraMetaServer` (TARPC) ← `AgoraClient::confirm_publisher` ← `Publisher::new`
     pub async fn confirm_publisher(&mut self, path: String) -> OrError<()> {
         if !self.publishers.contains_key(&path) {
             return Err(agora_error!("metaserver::ServerState", "confirm_publisher",
@@ -142,8 +144,8 @@ impl ServerState {
     }
 
     /// Returns publisher info after pinging to verify it's alive.
-    /// Error: Not found, not confirmed, or ping fails → returns to Subscriber::new.
-    /// Called by: AgoraMetaServer (TARPC) ← AgoraClient::get_publisher_info ← Subscriber::new
+    /// Error: Not found, not confirmed, or ping fails → returns to `Subscriber::new`.
+    /// Called by: `AgoraMetaServer` (TARPC) ← `AgoraClient::get_publisher_info` ← `Subscriber::new`
     pub async fn get_publisher_info(&mut self, path: String) -> OrError<PublisherInfo> {
         self.validate_path_format(&path)?;
 
@@ -232,7 +234,7 @@ impl ServerState {
     }
 
     /// Pings all confirmed publishers, removes those that fail to respond.
-    /// Called by: Background pruning task in AgoraMetaServer::run_server (every 500ms).
+    /// Called by: Background pruning task in `AgoraMetaServer::run_server` (every 500ms).
     /// Returns: List of pruned paths for logging.
     pub async fn prune_stale_publishers(&mut self) -> Vec<String> {
         let mut stale_paths: Vec<String> = Vec::new();

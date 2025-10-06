@@ -12,8 +12,8 @@ use std::marker::PhantomData;
 /// 2. **Assumes connection to Metaserver** at `metaserver_connection`.
 /// The publisher completes a handshake with metaserver by:
 /// 1. Initiate a metaclient and register path with metaserver.
-/// 2. Initiate a `PingServer` which responds with last values. Metaserver holds a `PingClient` and confirms the publisher upon successful pinging. Pings are published at {UDS PATH MODIFY HERE|}
-/// 3. Initiate a `RawstreamServer` of bytes and string, respectively at {UDS PATH...}. These are relayed by the Gateway.
+/// 2. Initiate a `PingServer` which responds with last values. Metaserver holds a `PingClient` and confirms the publisher upon successful pinging at `/tmp/agora/{path}/ping.sock`.
+/// 3. Initiate `RawStreamServer`s for bytes and strings at `/tmp/agora/{path}/bytes/rawstream.sock` and `/tmp/agora/{path}/string/rawstream.sock`. These are relayed by the Gateway.
 pub struct Publisher<T: Agorable> {
     _metaclient: AgoraClient,
     rawstream_byteserver: RawStreamServer<Vec<u8>>,
@@ -26,10 +26,10 @@ impl<T: Agorable> Publisher<T> {
     /// Creates publisher with registration sequence: register → create sockets → confirm.
     /// Creates three UDS WebSocket servers:
     /// - `/tmp/agora/{path}/bytes/rawstream.sock` (binary messages for `Subscriber<T>`)
-    /// - /tmp/agora/{path}/string/rawstream.sock (string messages for OmniSubscriber])
-    /// - /tmp/agora/{path}/ping.sock (health checks and current value queries)
+    /// - `/tmp/agora/{path}/string/rawstream.sock` (string messages for `OmniSubscriber`)
+    /// - `/tmp/agora/{path}/ping.sock` (health checks and current value queries)
     /// Error: Any step fails → propagates to user code.
-    /// Called by: User code, Relay::new
+    /// Called by: User code, `Relay::new`
     pub async fn new(
         name: String,
         path: String,
@@ -117,7 +117,7 @@ impl<T: Agorable> Publisher<T> {
     }
 
     /// Publishes value to all endpoints (ping + binary stream + string stream).
-    /// Updates ping server's current value, then broadcasts to all connected subscribers.
+    /// Updates ping server's current value, then broadcasts to all connected `Subscriber<T>` and `OmniSubscriber` instances.
     pub async fn publish(&mut self, value: T) -> OrError<()> {
         let (vec_payload, str_payload) = Self::value_to_payloads(&value)?;
 

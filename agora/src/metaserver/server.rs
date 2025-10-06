@@ -19,7 +19,9 @@ use tarpc::{
 };
 use tokio::time::{Duration, interval};
 
-// Asynchronous wrapper around synchronous ServerState implementation that handles networking with defaults.
+/// TARPC-based metaserver managing publisher registry with shared state architecture.
+/// Architecture: Single `ServerState` protected by `RwLock`, multiple concurrent TARPC connections, background pruning task.
+/// RPC protocol: `AgoraMeta` trait defines service discovery methods (register, confirm, query publishers).
 #[derive(Clone)]
 pub struct AgoraMetaServer {
     state: Arc<RwLock<ServerState>>,
@@ -68,8 +70,8 @@ impl AgoraMetaServer {
     }
 
     /// Starts TARPC metaserver with shared state model.
-    /// Architecture: One ServerState (RwLocked), many client connections, one pruning task.
-    /// Network: Listens on TCP for TARPC connections, serves AgoraMeta RPC methods.
+    /// Architecture: One `ServerState` (`RwLock`ed), many client connections, one pruning task.
+    /// Network: Listens on TCP for TARPC connections, serves `AgoraMeta` RPC methods.
     /// Background: Prunes stale publishers every 500ms by pinging them.
     pub async fn run_server(address: IpAddr, port: u16) -> anyhow::Result<()> {
         let server_addr = (address, port);

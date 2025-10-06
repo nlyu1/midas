@@ -153,7 +153,7 @@ fn show_help() {
 async fn print_path_tree(client: &AgoraClient) {
     match client.get_path_tree().await {
         Ok(tree) => {
-            println!("\n📁 Current Path Tree:");
+            println!("\nCurrent Path Tree:");
             println!("{}", tree.display_tree());
             println!();
         }
@@ -180,7 +180,7 @@ async fn remove_publisher(client: &AgoraClient, path: &str) {
 async fn get_publisher_info(client: &AgoraClient, path: &str) {
     match client.get_publisher_info(path.to_string()).await {
         Ok(publisher) => {
-            println!("📋 Publisher info at '{}': {:?}", path, publisher);
+            println!("Publisher info at '{}': {:?}", path, publisher);
         }
         Err(e) => {
             println!("❌ Failed to get publisher info: {}", e);
@@ -190,7 +190,7 @@ async fn get_publisher_info(client: &AgoraClient, path: &str) {
 
 async fn monitor_path(path: &str, metaserver_connection: ConnectionHandle) {
     println!(
-        "🔍 Starting to monitor path '{}' - Press Ctrl+D to exit",
+        "Starting to monitor path '{}' - Press Ctrl+D to exit",
         path
     );
 
@@ -210,7 +210,7 @@ async fn monitor_path(path: &str, metaserver_connection: ConnectionHandle) {
     // Get initial value and stream
     let (_current_value, mut stream) = match omni_subscriber.get_stream().await {
         Ok((current, stream)) => {
-            println!("📄 Current value: {}", current);
+            println!("Current value: {}", current);
             (current, stream)
         }
         Err(e) => {
@@ -223,7 +223,7 @@ async fn monitor_path(path: &str, metaserver_connection: ConnectionHandle) {
     let mut stdin_reader = stdin();
     let mut buffer = [0; 1];
 
-    println!("📡 Monitoring for new outputs...");
+    println!("Monitoring for new outputs...");
 
     loop {
         select! {
@@ -231,14 +231,14 @@ async fn monitor_path(path: &str, metaserver_connection: ConnectionHandle) {
             stream_result = stream.next() => {
                 match stream_result {
                     Some(Ok(value)) => {
-                        println!("📥 New output: {}", value);
+                        println!("New output: {}", value);
                     }
                     Some(Err(e)) => {
                         println!("❌ Stream error: {}", e);
                         break;
                     }
                     None => {
-                        println!("📪 Stream ended");
+                        println!("Stream ended");
                         break;
                     }
                 }
@@ -248,7 +248,7 @@ async fn monitor_path(path: &str, metaserver_connection: ConnectionHandle) {
                 match stdin_result {
                     Ok(0) => {
                         // EOF received (Ctrl+D)
-                        println!("\n🔚 Received Ctrl+D, exiting monitor mode");
+                        println!("\nReceived Ctrl+D, exiting monitor mode");
                         break;
                     }
                     Ok(_) => {

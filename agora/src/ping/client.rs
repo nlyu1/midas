@@ -13,6 +13,9 @@ use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 type WsSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
 type WsStream = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
+/// WebSocket ping client for health checks and current value queries via gateway.
+/// Protocol: Sends `"ping"` text → receives JSON with binary payload, string payload, timestamp.
+/// Network: Connects to `ws://gateway/ping/{path}` → proxies to `/tmp/agora/{path}/ping.sock`
 pub struct PingClient {
     ws_write: WsSink,
     ws_read: WsStream,
@@ -26,9 +29,9 @@ impl fmt::Debug for PingClient {
 
 impl PingClient {
     /// Creates WebSocket ping client to publisher via gateway.
-    /// Network: ws://gateway/ping/{path} → /tmp/agora/{path}/ping.sock
-    /// Error: Connection fails → propagates to Subscriber::new, ServerState::confirm_publisher.
-    /// Called by: Subscriber::new, OmniSubscriber::new, ServerState::confirm_publisher/prune_stale_publishers
+    /// Network: `ws://gateway/ping/{path}` → `/tmp/agora/{path}/ping.sock`
+    /// Error: Connection fails → propagates to `Subscriber::new`, `ServerState::confirm_publisher`.
+    /// Called by: `Subscriber::new`, `OmniSubscriber::new`, `ServerState::confirm_publisher`/`prune_stale_publishers`
     pub async fn new(
         agora_path: &str,
         gateway_connection: ConnectionHandle,
@@ -48,9 +51,9 @@ impl PingClient {
         Ok(Self { ws_write, ws_read })
     }
 
-    /// Sends "ping" text message, receives JSON response with current value and timestamp.
-    /// Returns (binary_payload, string_payload, round_trip_time).
-    /// Error: Send/receive fails or connection closed → propagates to Subscriber::get, metaserver pruning.
+    /// Sends `"ping"` text message, receives JSON response with current value and timestamp.
+    /// Returns `(binary_payload, string_payload, round_trip_time)`.
+    /// Error: Send/receive fails or connection closed → propagates to `Subscriber::get`, metaserver pruning.
     pub async fn ping(&mut self) -> OrError<(Vec<u8>, String, TimeDelta)> {
         // Send ping request
         self.ws_write

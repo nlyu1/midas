@@ -7,7 +7,8 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-/// A WebSocket client that connects to a RawStreamServer and receives messages.
+/// WebSocket client that connects to `RawStreamServer` with auto-reconnect.
+/// Retries connection every 100ms on failure, broadcasts messages to multiple subscribers via `tokio::broadcast`.
 pub struct RawStreamClient<T>
 where
     T: Clone + Send + 'static + Into<Vec<u8>> + TryFrom<Vec<u8>>,
@@ -27,9 +28,9 @@ where
         eprintln!("RawStreamClient error {}: {}", timestamp, message);
     }
     /// Creates WebSocket client with auto-reconnect to publisher's gateway.
-    /// Network: Connects via gateway proxy: ws://host:port/rawstream/{path} → /tmp/agora/{path}/rawstream.sock
+    /// Network: Connects via gateway proxy: `ws://host:port/rawstream/{path}` → `/tmp/agora/{path}/rawstream.sock`
     /// Errors never propagate after creation - client retries connection every 100ms indefinitely.
-    /// Called by: Subscriber::new, OmniSubscriber::new
+    /// Called by: `Subscriber::new`, `OmniSubscriber::new`
     pub fn new(
         host_gateway: ConnectionHandle,
         socket_path: &str,
@@ -122,7 +123,7 @@ where
     }
 
     /// Creates independent stream for consuming messages.
-    /// Multiple subscribers can call this to get separate streams of the same data.
+    /// Multiple callers can call `subscribe()` to get separate streams of the same data.
     pub fn subscribe(&self) -> BroadcastStream<T> {
         BroadcastStream::new(self.receiver.resubscribe())
     }

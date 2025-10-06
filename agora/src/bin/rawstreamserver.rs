@@ -17,21 +17,21 @@ async fn main() -> anyhow::Result<()> {
 
     let uds_path = format!("/tmp/agora/{}/rawstream.sock", args.directory);
 
-    println!("🚀 Starting Raw Stream Server at UDS: {}", uds_path);
+    println!("Starting Raw Stream Server at UDS: {}", uds_path);
     print!(
         "{}",
         indoc! {"
-            📝 Type messages and press Enter to broadcast them to connected clients
+            Type messages and press Enter to broadcast them to connected clients
         "}
     );
     println!(
-        "🔌 Clients connect via gateway: ws://[gateway_host]:port/rawstream/{}",
+        "Clients connect via gateway: ws://[gateway_host]:port/rawstream/{}",
         args.directory
     );
     print!(
         "{}",
         indoc! {"
-            💡 Type 'quit' or 'exit' to stop the server
+            Type 'quit' or 'exit' to stop the server
         "}
     );
 
@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
                 if line.is_empty() {
                     continue; // Skip empty lines
                 } else if line == "quit" || line == "exit" {
-                    println!("👋 Shutting down server...");
+                    println!("Shutting down server...");
                     break;
                 } else {
                     let now = chrono::Utc::now();
@@ -68,7 +68,7 @@ async fn main() -> anyhow::Result<()> {
                         now.timestamp_subsec_micros() as f64 / 1000.0
                     );
                     let timestamped_message = format!("[{}] {}", timestamp, line);
-                    println!("📡 Broadcasting: {}", timestamped_message);
+                    println!("Broadcasting: {}", timestamped_message);
                     if let Err(e) = server.publish(timestamped_message) {
                         eprintln!("❌ Failed to publish message: {}", e);
                         break;
@@ -76,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             Ok(None) | Err(_) => {
-                println!("📥 Input stream closed");
+                println!("Input stream closed");
                 break;
             }
         }

@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     print!(
         "{}",
         indoc! {"
-            📻 Agora Subscriber Example
+            Agora Subscriber Example
             This example demonstrates subscribing to messages from an Agora path.
         "}
     );
@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     io::stdin().read_line(&mut path)?;
     let path = path.trim().to_string();
 
-    println!("🔌 Connecting to metaserver and creating subscriber...");
+    println!("Connecting to metaserver and creating subscriber...");
 
     // Parse the IP address (supports both IPv4 and IPv6)
     let address: IpAddr = if let Some(host) = cli.host {
@@ -79,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     print!(
         "{}",
         indoc! {"
-            📡 Getting current value and starting stream...
+            Getting current value and starting stream...
         "}
     );
 
@@ -89,11 +89,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(|e| format!("Failed to get stream: {}", e))?;
 
-    println!("📥 Current value: {}", current_value);
+    println!("Current value: {}", current_value);
     print!(
         "{}",
         indoc! {"
-            🎧 Listening for new messages (Ctrl+C to exit):
+            Listening for new messages (Ctrl+C to exit):
         "}
     );
     println!("{}", "─".repeat(50));
@@ -102,7 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(result) = stream.next().await {
         match result {
             Ok(message) => {
-                println!("📨 New message: {}", message);
+                println!("New message: {}", message);
             }
             Err(e) => {
                 eprintln!("❌ Stream error: {}", e);
@@ -111,6 +111,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("📻 Stream ended. Goodbye!");
+    println!("Stream ended. Goodbye!");
     Ok(())
 }

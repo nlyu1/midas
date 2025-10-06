@@ -10,6 +10,9 @@ use futures_util::stream::Stream;
 use std::marker::PhantomData;
 use std::pin::Pin;
 
+/// Typed subscriber that queries metaserver for publisher location and connects to binary endpoint.
+/// Requires: Publisher exists and is confirmed in metaserver.
+/// Network: Queries metaserver → connects to `ws://gateway/rawstream/{path}/bytes` → proxies to `/tmp/agora/{path}/bytes/rawstream.sock`.
 pub struct Subscriber<T: Agorable> {
     _metaclient: AgoraClient,
     rawstreamclient: RawStreamClient<Vec<u8>>,
@@ -20,9 +23,9 @@ pub struct Subscriber<T: Agorable> {
 impl<T: Agorable> Subscriber<T> {
     /// Creates typed subscriber by querying metaserver for publisher location.
     /// Network flow: metaserver query → get gateway address → connect to binary endpoint.
-    /// Connects to ws://gateway/rawstream/{path}/bytes (via gateway proxy to UDS).
+    /// Connects to `ws://gateway/rawstream/{path}/bytes` (via gateway proxy to UDS).
     /// Error: Publisher not found or connection fails → propagates to user code.
-    /// Called by: User code, Relay::swapon
+    /// Called by: User code, `Relay::swapon`
     pub async fn new(
         path: String,
         metaserver_connection: ConnectionHandle,
@@ -85,7 +88,7 @@ impl<T: Agorable> Subscriber<T> {
     }
 
     /// Returns current value + stream of future updates.
-    /// Stream auto-reconnects on disconnect (handled by RawStreamClient).
+    /// Stream auto-reconnects on disconnect (handled by `RawStreamClient`).
     /// Error: Initial ping fails → propagates to caller. Stream errors appear in stream items.
     pub async fn get_stream(
         &mut self,
@@ -96,7 +99,7 @@ impl<T: Agorable> Subscriber<T> {
             agora_error_cause!(
                 "core::Subscriber",
                 "get_stream",
-                "failed to deserialize current value",
+                "failed to deserialize current value. If Omnisubscriber is succeeding, then double-check if published data type aligns with subscriber type.",
                 e
             )
         })?;
@@ -126,6 +129,8 @@ impl<T: Agorable> Subscriber<T> {
     }
 }
 
+/// Type-agnostic subscriber receiving string representations via Display trait.
+/// Identical to `Subscriber<T>` but connects to `/string` endpoint instead of `/bytes`.
 pub struct OmniSubscriber {
     _metaclient: AgoraClient,
     rawstreamclient: RawStreamClient<String>,
@@ -134,7 +139,7 @@ pub struct OmniSubscriber {
 
 impl OmniSubscriber {
     /// Creates type-agnostic subscriber receiving string representations.
-    /// Identical to Subscriber::new but connects to /string endpoint instead of /bytes.
+    /// Identical to `Subscriber::new` but connects to `/string` endpoint instead of `/bytes`.
     /// Error: Publisher not found or connection fails → propagates to user code.
     /// Called by: User code
     pub async fn new(

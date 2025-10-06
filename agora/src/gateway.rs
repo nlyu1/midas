@@ -7,6 +7,9 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tokio_tungstenite::{accept_hdr_async, client_async};
 
+/// TCP-to-UDS WebSocket proxy enabling cross-node publisher access.
+/// Listens on TCP, routes requests to local UDS sockets based on URL path.
+/// Routing: `/rawstream/{path}` → `/tmp/agora/{path}/rawstream.sock`, `/ping/{path}` → `/tmp/agora/{path}/ping.sock`
 pub struct Gateway {
     connection: ConnectionHandle,
     task_handle: JoinHandle<()>,
@@ -15,7 +18,7 @@ pub struct Gateway {
 impl Gateway {
     /// Creates TCP WebSocket gateway that proxies to local UDS endpoints.
     /// Network: Listens on TCP, accepts WebSocket connections, proxies to UDS.
-    /// URL routing: /rawstream/{path} or /ping/{path} → /tmp/agora/{path}/{service}.sock
+    /// URL routing: `/rawstream/{path}` or `/ping/{path}` → `/tmp/agora/{path}/{service}.sock`
     /// Error: Bind fails → propagates to caller. Connection errors logged per-connection.
     /// Called by: User code (main gateway process)
     pub async fn new(port: u16) -> OrError<Self> {
@@ -58,7 +61,7 @@ impl Gateway {
     }
 }
 
-// Handles single gateway connection: TCP WS ↔ UDS WS bidirectional proxy.
+// Handles single gateway connection: TCP WebSocket ↔ UDS WebSocket bidirectional proxy.
 // URL routing determines UDS target, then forwards all messages in both directions.
 async fn handle_connection(tcp_stream: tokio::net::TcpStream) -> OrError<()> {
     let mut agora_path = String::new();

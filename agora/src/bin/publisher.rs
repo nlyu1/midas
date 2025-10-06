@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     print!(
         "{}",
         indoc! {"
-            🚀 Agora Publisher Example
+            Agora Publisher Example
             This example demonstrates publishing messages to an Agora path.
         "}
     );
@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .as_secs(),
     };
 
-    println!("📡 Connecting to metaserver and creating publisher...");
+    println!("Connecting to metaserver and creating publisher...");
 
     // Parse the IP address (supports both IPv4 and IPv6)
     let address: IpAddr = if let Some(host) = cli.host {
@@ -114,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     print!(
         "{}",
         indoc! {"
-            💬 Enter messages to publish (Ctrl+C to exit):
+            Enter messages to publish (Ctrl+C to exit):
         "}
     );
 
@@ -127,7 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match io::stdin().read_line(&mut input) {
             Ok(0) => {
                 // EOF (Ctrl+D)
-                println!("\n👋 Goodbye!");
+                println!("\nGoodbye!");
                 break;
             }
             Ok(_) => {
@@ -145,7 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 match publisher.publish(message.clone()).await {
                     Ok(()) => {
-                        println!("📤 Published: {}", message);
+                        println!("Published: {}", message);
                     }
                     Err(e) => {
                         eprintln!("❌ Failed to publish message: {}", e);

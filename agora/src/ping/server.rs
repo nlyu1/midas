@@ -14,6 +14,9 @@ struct Payload {
     str_payload: String,
 }
 
+/// UDS WebSocket server responding to `"ping"` with JSON payload (current value + timestamp).
+/// Protocol: Receives `"ping"` text → sends JSON `PingResponse` with `vec_payload`, `str_payload`, `timestamp`.
+/// Payload updates: Thread-safe via `RwLock`, shared across all connection handlers.
 pub struct PingServer {
     payload: Arc<RwLock<Payload>>,
     bg_handle: JoinHandle<()>,
@@ -22,9 +25,9 @@ pub struct PingServer {
 
 impl PingServer {
     /// Creates UDS WebSocket server for ping-pong protocol.
-    /// Responds to "ping" text messages with JSON containing current value and timestamp.
-    /// Error: Socket bind fails → propagates to Publisher::new.
-    /// Called by: Publisher::new
+    /// Responds to `"ping"` text messages with JSON containing current value and timestamp.
+    /// Error: Socket bind fails → propagates to `Publisher::new`.
+    /// Called by: `Publisher::new`
     pub async fn new(
         agora_path: &str,
         vec_payload: Vec<u8>,
@@ -82,7 +85,7 @@ impl PingServer {
         })
     }
 
-    /// Updates current payload under RwLock. Called by Publisher::publish().
+    /// Updates current payload under `RwLock`. Called by `Publisher::publish()`.
     pub fn update_payload(&mut self, vec_payload: Vec<u8>, str_payload: String) {
         let mut payload = self.payload.write().unwrap();
         payload.vec_payload = vec_payload;

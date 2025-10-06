@@ -37,7 +37,7 @@ async fn main() -> anyhow::Result<()> {
     let gateway = ConnectionHandle::new(address, args.port);
 
     println!(
-        "🔗 Connecting to Ping Server via gateway at {}/ping/{}",
+        "Connecting to Ping Server via gateway at {}/ping/{}",
         gateway, args.directory
     );
 
@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     println!(
-        "📡 Pinging every {}ms... (Press Ctrl+C to exit)\n",
+        "Pinging every {}ms... (Press Ctrl+C to exit)\n",
         args.interval_ms
     );
 
@@ -78,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
                     now.timestamp_subsec_micros() as f64 / 1000.0
                 );
 
-                println!("📨 [{}] Ping response:", timestamp);
+                println!("[{}] Ping response:", timestamp);
                 println!("    String payload: \"{}\"", str_payload);
                 println!("    Vec payload: {} bytes", vec_payload.len());
                 println!("    Round-trip time: {}ms", time_delta.num_milliseconds());
