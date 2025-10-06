@@ -1,3 +1,6 @@
+//! TARPC-based metaserver for service discovery with shared state and background pruning.
+//! `AgoraMetaServer` implements `AgoraMeta` RPC trait, manages `ServerState` via `RwLock`, runs background task to prune stale publishers every 500ms.
+
 use super::ServerState;
 use super::protocol::AgoraMeta;
 use super::publisher_info::PublisherInfo;
@@ -42,12 +45,12 @@ impl AgoraMeta for AgoraMetaServer {
 
     async fn confirm_publisher(self, _: context::Context, path: String) -> OrError<()> {
         let mut state = self.state.write().await;
-        state.confirm_publisher(path).await
+        state.confirm_publisher(&path).await
     }
 
     async fn remove_publisher(self, _: context::Context, path: String) -> OrError<PublisherInfo> {
         let mut state = self.state.write().await;
-        state.remove_publisher(path)
+        state.remove_publisher(&path)
     }
 
     async fn path_tree(self, _: context::Context) -> String {
@@ -57,7 +60,7 @@ impl AgoraMeta for AgoraMetaServer {
 
     async fn publisher_info(self, _: context::Context, path: String) -> OrError<PublisherInfo> {
         let mut state = self.state.write().await;
-        state.get_publisher_info(path).await
+        state.get_publisher_info(&path).await
     }
 }
 

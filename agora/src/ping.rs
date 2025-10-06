@@ -1,3 +1,6 @@
+//! Ping protocol module for publisher health checks and current value queries.
+//! Provides `PingClient` (via gateway) and `PingServer` (UDS) for synchronous request-response communication with publishers.
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 

@@ -53,7 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     print!(
         "{}",
         indoc! {"
-            🔄 Agora Relay Example
+            Agora Relay Example
             This example demonstrates relaying messages between Agora paths.
         "}
     );
@@ -63,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Setup relay configuration
-    println!("📡 Setting up relay destination:");
+    println!("Setting up relay destination:");
 
     let dest_path = read_input("Enter destination path (e.g., relay/output): ")?;
     let name = dest_path.clone(); // name = dest_path as requested
@@ -90,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         dest_metaserver_connection
     );
 
-    println!("🚀 Creating relay...");
+    println!("Creating relay...");
 
     // Create relay
     let mut relay = Relay::<Message>::new(
@@ -104,13 +104,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .map_err(|e| format!("Failed to create relay: {}", e))?;
 
     println!("✅ Relay created successfully!");
-    println!("📍 Destination: '{}'", dest_path);
+    println!("Destination: '{}'", dest_path);
     print!(
         "{}",
         indoc! {"
 
-            🔄 Ready for swap operations. Enter source configurations:
-            💡 Press Ctrl+C to exit
+            Ready for swap operations. Enter source configurations:
+            Press Ctrl+C to exit
         "}
     );
     println!("{}", "─".repeat(50));
@@ -118,16 +118,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Main swap loop
     loop {
         println!();
-        println!("🔀 New swap operation:");
+        println!("New swap operation:");
 
         let src_path = match read_input("Enter source path (or 'quit' to exit): ") {
             Ok(path) => {
                 if path == "quit" || path == "exit" {
-                    println!("👋 Goodbye!");
+                    println!("Goodbye!");
                     break;
                 }
                 if path.is_empty() {
-                    println!("⚠️  Source path cannot be empty");
+                    println!("Source path cannot be empty");
                     continue;
                 }
                 path
@@ -176,8 +176,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let src_metaserver_connection = ConnectionHandle::new(src_host, src_metaserver_port);
-        println!("🔄 Swapping to source: '{}' -> '{}'", src_path, dest_path);
-        println!("📡 Source metaserver: {}", src_metaserver_connection);
+        println!("Swapping to source: '{}' -> '{}'", src_path, dest_path);
+        println!("Source metaserver: {}", src_metaserver_connection);
 
         // Perform swapon
         match relay
@@ -186,11 +186,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         {
             Ok(()) => {
                 println!("✅ Successfully swapped to source '{}'", src_path);
-                println!("📡 Now relaying: {} -> {}", src_path, dest_path);
+                println!("Now relaying: {} -> {}", src_path, dest_path);
             }
             Err(e) => {
                 eprintln!("❌ Failed to swap: {}", e);
-                println!("🔄 Relay continues with previous source");
+                println!("Relay continues with previous source");
             }
         }
     }

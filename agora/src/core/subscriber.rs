@@ -1,3 +1,6 @@
+//! Subscriber implementations: `Subscriber<T>` for typed streams (binary endpoint) and `OmniSubscriber` for type-agnostic monitoring (string endpoint).
+//! Both query metaserver for publisher location, connect to gateway-proxied WebSocket streams, and provide current value + stream access.
+
 use super::Agorable;
 use crate::ConnectionHandle;
 use crate::agora_error_cause;
@@ -39,15 +42,15 @@ impl<T: Agorable> Subscriber<T> {
 
         // Step 2: Query metaserver for publisher location (pings publisher to verify alive)
         let publisher_info = metaclient
-            .get_publisher_info(normalized_path.clone())
+            .get_publisher_info(&normalized_path)
             .await?;
-        let host_gateway_connection = publisher_info.connection();
+        let host_gateway_connection = *publisher_info.connection();
 
         // Step 3: Connect to binary endpoint (path/bytes for Subscriber\<T>)
         let bytes_path_str = format!("{}/bytes", normalized_path);
 
         let rawstreamclient: RawStreamClient<Vec<u8>> =
-            RawStreamClient::new(host_gateway_connection.clone(), &bytes_path_str, None, None)
+            RawStreamClient::new(host_gateway_connection, &bytes_path_str, None, None)
                 .map_err(|e| {
                     agora_error_cause!(
                         "core::Subscriber",
@@ -158,15 +161,15 @@ impl OmniSubscriber {
         let normalized_path = strip_and_verify(&path)?;
 
         let publisher_info = metaclient
-            .get_publisher_info(normalized_path.clone())
+            .get_publisher_info(&normalized_path)
             .await?;
-        let host_gateway_connection = publisher_info.connection();
+        let host_gateway_connection = *publisher_info.connection();
 
         // Connect to string endpoint (path/string for OmniSubscriber)
         let string_path_str = format!("{}/string", normalized_path);
 
         let rawstreamclient: RawStreamClient<String> = RawStreamClient::new(
-            host_gateway_connection.clone(),
+            host_gateway_connection,
             &string_path_str,
             None,
             None,

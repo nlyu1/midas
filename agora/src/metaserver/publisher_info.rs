@@ -1,5 +1,10 @@
+//! Publisher metadata containing name, gateway connection, and path.
+//! `PublisherInfo` is returned by metaserver queries and transmitted via TARPC for service discovery.
+
 use crate::ConnectionHandle;
 
+/// Publisher metadata bundling name, gateway address, and registry path.
+/// Returned by `AgoraMetaServer::register_publisher` and `get_publisher_info`, transmitted to subscribers for connection setup.
 #[derive(Debug, PartialEq, Eq, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PublisherInfo {
     name: String,
@@ -17,13 +22,13 @@ impl PublisherInfo {
     }
 
     /// Get the socket address for tcp-websocket connections
-    pub fn connection(&self) -> ConnectionHandle {
-        self.host_connection.clone()
+    pub fn connection(&self) -> &ConnectionHandle {
+        &self.host_connection
     }
 
     /// Get the socket address for heartbeat connections
-    pub fn path(&self) -> String {
-        self.agora_path.clone()
+    pub fn path(&self) -> &str {
+        &self.agora_path
     }
 
     /// Get a human-readable connection string

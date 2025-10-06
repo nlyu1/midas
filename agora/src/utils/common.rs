@@ -1,9 +1,15 @@
+//! Shared utilities for Agora: `ConnectionHandle` for network addressing, error macros (`agora_error!`, `agora_error_cause!`),
+//! path validation (`strip_and_verify`), and socket setup (`prepare_socket_path`). Used across all modules.
+
 use local_ip_address::local_ip;
 use std::fmt::{Display, Formatter};
 use std::net::IpAddr;
 use crate::{agora_error, agora_error_cause};
 
-#[derive(serde::Deserialize, serde::Serialize, Debug, Clone, PartialEq, Eq)]
+/// Network address handle (IP + port) for gateway and metaserver connections.
+/// Serializable for RPC transmission in `PublisherInfo`. Used by `Publisher`, `Subscriber`, `Gateway` to establish connections.
+/// Display format: IPv4 as `ip:port`, IPv6 as `[ip]:port`.
+#[derive(serde::Deserialize, serde::Serialize, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct ConnectionHandle {
     addr: IpAddr,
     port: u16,

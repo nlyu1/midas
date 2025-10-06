@@ -1,3 +1,6 @@
+//! WebSocket ping client for publisher health checks and current value queries.
+//! `PingClient` connects via gateway, sends `"ping"` text, receives JSON with binary/string payload + timestamp. Used by metaserver pruning and subscribers.
+
 use super::PingResponse;
 use crate::utils::OrError;
 use crate::ConnectionHandle;

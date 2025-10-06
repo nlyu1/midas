@@ -1,3 +1,6 @@
+//! TCP-to-UDS WebSocket gateway enabling cross-node publisher access.
+//! Routes external connections to local Unix domain sockets: `/rawstream/{path}` → `/tmp/agora/{path}/rawstream.sock`, `/ping/{path}` → `/tmp/agora/{path}/ping.sock`.
+
 use crate::ConnectionHandle;
 use crate::utils::OrError;
 use futures_util::{SinkExt, StreamExt};

@@ -1,3 +1,6 @@
+//! Typed publisher implementation: `Publisher<T>` registers with metaserver, creates dual endpoints (bytes + string),
+//! and provides health check server. Handles registration sequence: register → create sockets → confirm.
+
 use super::Agorable;
 use crate::agora_error_cause;
 use crate::metaserver::AgoraClient;
@@ -46,7 +49,7 @@ impl<T: Agorable> Publisher<T> {
         let publisher_info = metaclient
             .register_publisher(name, path.clone(), local_gateway_port)
             .await?;
-        let _local_gateway_connection = publisher_info.connection();
+        let _local_gateway_connection = *publisher_info.connection();
 
         let normalized_path = strip_and_verify(&path)?;
 
@@ -90,7 +93,7 @@ impl<T: Agorable> Publisher<T> {
             })?;
 
         // Step 5: Confirm publisher (metaserver pings to verify sockets are live)
-        metaclient.confirm_publisher(path).await.map_err(|e| {
+        metaclient.confirm_publisher(&path).await.map_err(|e| {
             agora_error_cause!("core::Publisher", "new", "failed to confirm publisher", e)
         })?;
 
@@ -123,7 +126,7 @@ impl<T: Agorable> Publisher<T> {
 
         // Update ping server (for health checks and get() calls)
         self.pingserver
-            .update_payload(vec_payload.clone(), str_payload.clone());
+            .update_payload(&vec_payload, &str_payload);
 
         // Broadcast to binary subscribers (Subscriber\<T>)
         self.rawstream_byteserver.publish(vec_payload)?;

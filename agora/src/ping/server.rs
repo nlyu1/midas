@@ -1,3 +1,6 @@
+//! UDS WebSocket server for ping-pong protocol with current value responses.
+//! `PingServer` listens on UDS, responds to `"ping"` with JSON containing binary/string payload + timestamp. Thread-safe payload updates via `RwLock`.
+
 use super::PingResponse;
 use crate::utils::{OrError, prepare_socket_path};
 use crate::agora_error_cause;
@@ -86,10 +89,10 @@ impl PingServer {
     }
 
     /// Updates current payload under `RwLock`. Called by `Publisher::publish()`.
-    pub fn update_payload(&mut self, vec_payload: Vec<u8>, str_payload: String) {
+    pub fn update_payload(&mut self, vec_payload: &[u8], str_payload: &str) {
         let mut payload = self.payload.write().unwrap();
-        payload.vec_payload = vec_payload;
-        payload.str_payload = str_payload;
+        payload.vec_payload = vec_payload.to_vec();
+        payload.str_payload = str_payload.to_string();
     }
 }
 

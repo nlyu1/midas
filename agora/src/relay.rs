@@ -1,3 +1,6 @@
+//! Dynamic message relay with switchable source and fixed destination.
+//! `Relay<T>` enables contiguous streaming from discontinuous sources via `swapon()`, useful for cross-metaserver bridging and failover scenarios.
+
 use crate::utils::{ConnectionHandle, OrError};
 use crate::{Agorable, Publisher, Subscriber};
 use crate::{agora_error, agora_error_cause};

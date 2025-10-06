@@ -1,3 +1,6 @@
+//! Hierarchical tree structure for metaserver publisher registry.
+//! `TreeNode` provides thread-safe path operations (add, remove, traverse) with invariant: publishers are leaves, ancestors are directories.
+
 use crate::utils::OrError;
 use crate::agora_error;
 use std::fmt;

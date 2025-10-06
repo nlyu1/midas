@@ -1,3 +1,6 @@
+//! TARPC client for metaserver RPC operations (register, confirm, query publishers).
+//! `AgoraClient` wraps `AgoraMetaClient`, provides high-level API for `Publisher`, `Subscriber`, `Relay` to interact with metaserver.
+
 use super::protocol::AgoraMetaClient;
 use super::publisher_info::PublisherInfo;
 use crate::ConnectionHandle;
@@ -49,18 +52,18 @@ impl AgoraClient {
             .map_err(|e| agora_error_cause!("metaserver::AgoraClient", "register_publisher", "RPC call failed", e))?
     }
 
-    pub async fn confirm_publisher(&self, path: String) -> OrError<()> {
+    pub async fn confirm_publisher(&self, path: &str) -> OrError<()> {
         self
             .client
-            .confirm_publisher(context::current(), path)
+            .confirm_publisher(context::current(), path.to_string())
             .await
             .map_err(|e| agora_error_cause!("metaserver::AgoraClient", "confirm_publisher", "RPC call failed", e))?
     }
 
-    pub async fn remove_publisher(&self, path: String) -> OrError<PublisherInfo> {
+    pub async fn remove_publisher(&self, path: &str) -> OrError<PublisherInfo> {
         self
             .client
-            .remove_publisher(context::current(), path)
+            .remove_publisher(context::current(), path.to_string())
             .await
             .map_err(|e| agora_error_cause!("metaserver::AgoraClient", "remove_publisher", "RPC call failed", e))?
     }
@@ -75,10 +78,10 @@ impl AgoraClient {
         TreeNode::from_repr(&tree_repr)
     }
 
-    pub async fn get_publisher_info(&self, path: String) -> OrError<PublisherInfo> {
+    pub async fn get_publisher_info(&self, path: &str) -> OrError<PublisherInfo> {
         self
             .client
-            .publisher_info(context::current(), path)
+            .publisher_info(context::current(), path.to_string())
             .await
             .map_err(|e| agora_error_cause!("metaserver::AgoraClient", "get_publisher_info", "RPC call failed", e))?
     }
@@ -87,6 +90,6 @@ impl AgoraClient {
 impl Clone for AgoraClient {
     fn clone(&self) -> Self {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move { Self::new(self.metaserver_connection.clone()).await.unwrap() })
+        rt.block_on(async move { Self::new(self.metaserver_connection).await.unwrap() })
     }
 }

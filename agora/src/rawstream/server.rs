@@ -1,3 +1,6 @@
+//! UDS WebSocket server for broadcasting messages to N clients.
+//! `RawStreamServer<T>` uses dual-task architecture: ingestion (receives from `publish()`) + connection handler (fans out to clients via `tokio::broadcast`).
+
 use crate::utils::{OrError, prepare_socket_path};
 use crate::{agora_error, agora_error_cause};
 use futures_util::{SinkExt, StreamExt};

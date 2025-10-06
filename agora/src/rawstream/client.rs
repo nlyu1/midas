@@ -1,3 +1,6 @@
+//! Auto-reconnecting WebSocket client for streaming publisher data.
+//! `RawStreamClient<T>` connects via gateway, retries every 100ms on failure, broadcasts messages to multiple subscribers via `tokio::broadcast`.
+
 use crate::ConnectionHandle;
 use crate::utils::OrError;
 use chrono::Utc;

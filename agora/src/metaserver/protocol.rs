@@ -1,3 +1,6 @@
+//! TARPC service trait defining metaserver RPC protocol.
+//! `AgoraMeta` specifies async methods for publisher lifecycle: register, confirm, remove, query, and path tree inspection.
+
 use super::publisher_info::PublisherInfo;
 use crate::ConnectionHandle;
 use crate::utils::OrError;

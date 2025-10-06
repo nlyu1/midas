@@ -1,3 +1,6 @@
+//! Shared metaserver state managing publisher registry, path tree, and active health checks.
+//! `ServerState` enforces invariant (publishers = leaves, ancestors = directories), validates paths, confirms publishers via ping, prunes stale entries.
+
 use super::publisher_info::PublisherInfo;
 use crate::ConnectionHandle;
 use crate::ping::PingClient;
@@ -67,10 +70,10 @@ impl ServerState {
         self.ensure_path_exists(&path)?;
 
         let publisher_info = PublisherInfo::new(&name, host_connection, &path);
-        self.publishers.insert(path.clone(), publisher_info.clone());
+        self.publishers.insert(path, publisher_info.clone());
         println!(
             "Registered publisher {:?} at path {}",
-            publisher_info, &path
+            &publisher_info.name(), &publisher_info.path()
         );
         Ok(publisher_info)
     }
@@ -79,27 +82,27 @@ impl ServerState {
     /// Auto-removes publisher from registry if ping fails.
     /// Error: Not registered, already confirmed, or ping fails → returns to `Publisher::new`.
     /// Called by: `AgoraMetaServer` (TARPC) ← `AgoraClient::confirm_publisher` ← `Publisher::new`
-    pub async fn confirm_publisher(&mut self, path: String) -> OrError<()> {
-        if !self.publishers.contains_key(&path) {
+    pub async fn confirm_publisher(&mut self, path: &str) -> OrError<()> {
+        if !self.publishers.contains_key(path) {
             return Err(agora_error!("metaserver::ServerState", "confirm_publisher",
                 &format!("please register path {} before confirming", path)));
         }
 
-        if self.confirmed_publishers.contains_key(&path) {
+        if self.confirmed_publishers.contains_key(path) {
             return Err(agora_error!("metaserver::ServerState", "confirm_publisher",
                 &format!("path {} already registered and confirmed", path)));
         }
 
-        let publisher_info = self.publishers.get(&path).unwrap();
+        let publisher_info = self.publishers.get(path).unwrap();
 
         // Create ping client - if fails, auto-remove registration
-        let mut pingclient = PingClient::new(&path, publisher_info.connection())
+        let mut pingclient = PingClient::new(path, *publisher_info.connection())
             .await
             .map_err(|e| {
-                let _ = self.remove_publisher(path.clone());
+                let _ = self.remove_publisher(path);
                 eprintln!(
                     "Removed registered publisher {} upon unsuccessful confirmation",
-                    &path
+                    path
                 );
                 agora_error_cause!("metaserver::ServerState", "confirm_publisher",
                     "failed to create ping client. Are you running the gateway?", e)
@@ -107,31 +110,31 @@ impl ServerState {
 
         // Test ping - if fails, auto-remove registration
         let _ = pingclient.ping().await.inspect_err(|_| {
-            let _ = self.remove_publisher(path.clone());
+            let _ = self.remove_publisher(path);
             eprintln!(
                 "Removed registered publisher {} upon unsuccessful confirmation",
-                &path
+                path
             );
         })?;
 
         // Success: store ping client for health checks
-        println!("Publisher {} confirmed.", &path);
-        self.confirmed_publishers.insert(path, pingclient);
+        println!("Publisher {} confirmed.", path);
+        self.confirmed_publishers.insert(path.to_string(), pingclient);
         Ok(())
     }
 
-    pub fn remove_publisher(&mut self, path: String) -> OrError<PublisherInfo> {
+    pub fn remove_publisher(&mut self, path: &str) -> OrError<PublisherInfo> {
         // Validate path format strictly
-        self.validate_path_format(&path)?;
+        self.validate_path_format(path)?;
 
         // Check if publisher exists and remove it
         // Note: Due to parent invariant, publishers can only exist at leaf nodes,
         // so we don't need to check for child publishers anymore
-        match self.publishers.remove(&path) {
+        match self.publishers.remove(path) {
             Some(publisher_info) => {
-                self.path_tree.remove_child_and_branch(&path)?;
+                self.path_tree.remove_child_and_branch(path)?;
                 // Remove from confirmed_publishers if it exists (it may not if confirmation failed)
-                self.confirmed_publishers.remove(&path);
+                self.confirmed_publishers.remove(path);
                 Ok(publisher_info)
             }
             None => Err(agora_error!("metaserver::ServerState", "remove_publisher",
@@ -146,12 +149,12 @@ impl ServerState {
     /// Returns publisher info after pinging to verify it's alive.
     /// Error: Not found, not confirmed, or ping fails → returns to `Subscriber::new`.
     /// Called by: `AgoraMetaServer` (TARPC) ← `AgoraClient::get_publisher_info` ← `Subscriber::new`
-    pub async fn get_publisher_info(&mut self, path: String) -> OrError<PublisherInfo> {
-        self.validate_path_format(&path)?;
+    pub async fn get_publisher_info(&mut self, path: &str) -> OrError<PublisherInfo> {
+        self.validate_path_format(path)?;
 
         match (
-            self.publishers.get(&path),
-            self.confirmed_publishers.get_mut(&path),
+            self.publishers.get(path),
+            self.confirmed_publishers.get_mut(path),
         ) {
             (Some(publisher), Some(pingclient)) => {
                 // Ping before returning to ensure publisher is alive
@@ -246,13 +249,13 @@ impl ServerState {
         for path in paths_to_check {
             if let Some(ping_client) = self.confirmed_publishers.get_mut(&path)
                 && let Err(_) = ping_client.ping().await {
-                stale_paths.push(path.clone());
+                stale_paths.push(path);
             }
         }
 
         // Remove stale publishers from registry and tree
         for path in &stale_paths {
-            if let Err(e) = self.remove_publisher(path.clone()) {
+            if let Err(e) = self.remove_publisher(path) {
                 eprintln!("Failed to remove stale publisher at {}: {}", path, e);
             }
         }
