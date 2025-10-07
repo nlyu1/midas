@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
                 } else {
                     let vec_payload = line.as_bytes().to_vec();
                     println!("Updating payload: \"{}\"", line);
-                    server.update_payload(vec_payload, line);
+                    server.update_payload(&vec_payload, &line);
                 }
             }
             Ok(None) | Err(_) => {

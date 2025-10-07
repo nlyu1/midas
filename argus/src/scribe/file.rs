@@ -1,6 +1,5 @@
-use crate::types::TradingSymbol;
-
 use super::ArgusParquetable;
+use crate::types::TradingSymbol;
 use agora::metaserver::AgoraClient;
 use agora::utils::{OrError, TreeTrait};
 use agora::{Agorable, Subscriber};

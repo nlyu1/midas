@@ -1,2 +1,0 @@
-- Start server: `cargo run --bin tarpc-tutorial-server -- --port 8080`
-- Start client: `cargo run --bin tarpc-tutorial-client -- --port 8080 --name "midas"`

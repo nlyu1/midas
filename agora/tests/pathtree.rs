@@ -170,7 +170,10 @@ mod tests {
         );
         assert_eq!(
             root.remove_child_and_branch("test/test_folder"),
-            Err(format!("Cannot remove non-leaf node")),
+            Err(
+                "Agora utils::TreeNode::remove_child_and_branch Error: cannot remove non-leaf node"
+                    .to_string()
+            ),
         );
         // Removing root should fail
         match root.remove_child_and_branch("") {

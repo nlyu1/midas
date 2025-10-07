@@ -164,7 +164,7 @@ async fn print_path_tree(client: &AgoraClient) {
 }
 
 async fn remove_publisher(client: &AgoraClient, path: &str) {
-    match client.remove_publisher(path.to_string()).await {
+    match client.remove_publisher(path).await {
         Ok(removed_publisher) => {
             println!(
                 "✅ Successfully removed publisher at '{}': {:?}",
@@ -178,7 +178,7 @@ async fn remove_publisher(client: &AgoraClient, path: &str) {
 }
 
 async fn get_publisher_info(client: &AgoraClient, path: &str) {
-    match client.get_publisher_info(path.to_string()).await {
+    match client.get_publisher_info(path).await {
         Ok(publisher) => {
             println!("Publisher info at '{}': {:?}", path, publisher);
         }

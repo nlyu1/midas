@@ -254,12 +254,12 @@ mod tests {
         assert!(register_result.unwrap_err().contains("cannot be empty"));
 
         // Remove with empty path
-        let remove_result = process.remove_publisher("".to_string());
+        let remove_result = process.remove_publisher("");
         assert!(remove_result.is_err());
         assert!(remove_result.unwrap_err().contains("cannot be empty"));
 
         // Get publisher info with empty path
-        let info_result = process.get_publisher_info("".to_string()).await;
+        let info_result = process.get_publisher_info("").await;
         assert!(info_result.is_err());
         assert!(info_result.unwrap_err().contains("cannot be empty"));
     }

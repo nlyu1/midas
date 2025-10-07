@@ -1,4 +1,3 @@
 [workspace]
 resolver = "3"
-members = ["agora", "argus", "tutorials/rpc/json-tarpc", 
-"tutorials/tokio/my-redis"]
+members = ["agora", "argus"]

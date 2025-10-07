@@ -5,9 +5,9 @@ Agora is a distributed publisher-subscriber messaging system built with path-bas
 ## Core Concepts
 
 **Publisher\<T>**: Creates a typed publisher for messages of _Agorable_ type `T`. Each publisher exposes three endpoints:
-- Service endpoint for typed binary messages
-- String endpoint for type-agnostic monitoring
-- Ping endpoint for health checks and one-time queries
+- Binary endpoint for typed messages (via Postcard serialization, consumed by `Subscriber<T>`)
+- String endpoint for type-agnostic monitoring (via `Display` trait, consumed by `OmniSubscriber`)
+- Ping endpoint for health checks and one-time current value queries
 
 **Subscriber\<T>**: Connects to publishers of the same type `T` for streaming typed messages.
 
@@ -73,7 +73,8 @@ Run on any node with connection to main (can be main):
 cargo run --bin gateway
 # Agora Gateway listening on 192.168.0.69:8081
 # - Ready to proxy connections:
-#   - /rawstream/{path} → /tmp/agora/{path}/rawstream.sock
+#   - /rawstream/{path}/bytes → /tmp/agora/{path}/bytes/rawstream.sock
+#   - /rawstream/{path}/string → /tmp/agora/{path}/string/rawstream.sock
 #   - /ping/{path} → /tmp/agora/{path}/ping.sock
 ```
 
@@ -113,12 +114,12 @@ cargo run --bin gateway # Agora Gateway listening on 192.168.0.75:8081
 # Node 1
 cargo run --bin metaserver # Metaserver active on 192.168.0.69:8080
 ```
-Start two publishers on node 0: 
+Start two publishers on node 0:
 ```bash
 # Separate terminal: create `src0_node0` publisher by answering `src0_node0` to all three prompts
-cargo run --bin publisher 
-# Separate terminal: create `src1_node0` publisher by answering `src0_node0` to all three prompts
-cargo run --bin publisher 
+cargo run --bin publisher
+# Separate terminal: create `src1_node0` publisher by answering `src1_node0` to all three prompts
+cargo run --bin publisher
 ```
 Start a relay on node 0, _publishing to node 1_: 
 ```bash 
@@ -126,10 +127,10 @@ Start a relay on node 0, _publishing to node 1_:
 cargo run --bin relay_example -- --host 192.168.0.69 
 # When prompted, swap on `src0_node0` from `192.168.0.75`
 ```
-Start a subscriber on node 1
+Start a subscriber on node 1:
 ```bash
 # Node 1. Subscribe to `dest_node1`
-`cargo run --bin subscriber 
+cargo run --bin subscriber
 ```
 Now, try publishing values in the `src0_node0` and `src1_node0` processes separately: only one of them will be published to `dest_node1`, and this can be controlled by the relay process. 
 - **Sharp edge!!**: user is responsible for creating `Relay<T>` of the correct type as the publisher! Channel type mismatch will result in opaque runtime errors. 
@@ -168,7 +169,8 @@ Each subscriber instantiates an `AgoraClient` (metaclient), which queries the me
   - Ping: `ws://{publisher_ip}:{gateway_port}/ping/{path}`
 
 The **gateway** acts as a bidirectional proxy, forwarding each TCP WebSocket connection to the corresponding local UDS endpoint:
-- `ws://{gateway_ip}:{gateway_port}/rawstream/{path}` ↔ `/tmp/agora/{path}/rawstream.sock`
+- `ws://{gateway_ip}:{gateway_port}/rawstream/{path}/bytes` ↔ `/tmp/agora/{path}/bytes/rawstream.sock`
+- `ws://{gateway_ip}:{gateway_port}/rawstream/{path}/string` ↔ `/tmp/agora/{path}/string/rawstream.sock`
 - `ws://{gateway_ip}:{gateway_port}/ping/{path}` ↔ `/tmp/agora/{path}/ping.sock`
 
 This architecture decentralizes data flow: the metaserver only handles discovery, while actual message streaming occurs directly between gateways and publishers via WebSocket pipes. 
@@ -237,7 +239,7 @@ agora/
 
 **Communication Layer**:
 - **Gateway (`gateway.rs`)**: Bidirectional TCP-to-UDS WebSocket proxy, enabling cross-node communication
-  - Maps `/rawstream/{path}` → `/tmp/agora/{path}/rawstream.sock` and `/ping/{path}` → `/tmp/agora/{path}/ping.sock`
+  - Maps `/rawstream/{path}/bytes` → `/tmp/agora/{path}/bytes/rawstream.sock`, `/rawstream/{path}/string` → `/tmp/agora/{path}/string/rawstream.sock`, and `/ping/{path}` → `/tmp/agora/{path}/ping.sock`
   - Each connection spawns independent forwarding tasks for decentralized data flow
 - **RawStream (`rawstream/`)**: WebSocket-based pub-sub protocol using Tokio broadcast channels
   - Server: Binds UDS listener, fans out messages to all connected clients via `broadcast::channel`
