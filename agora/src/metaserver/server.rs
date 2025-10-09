@@ -13,7 +13,7 @@ use tokio::task::JoinHandle;
 
 use std::net::IpAddr;
 use tarpc::context;
-use tarpc::server::incoming::Incoming;
+// use tarpc::server::incoming::Incoming;
 
 use futures::prelude::*;
 use tarpc::{
@@ -107,19 +107,17 @@ impl AgoraMetaServer {
         listener
             .filter_map(|r| futures::future::ready(r.ok())) // Ignore accept errors
             .map(server::BaseChannel::with_defaults)
-            .max_channels_per_key(1024 * 1024, |t| t.transport().peer_addr().unwrap().ip())
+            // .max_channels_per_key(1024 * 1024, |t| t.transport().peer_addr().unwrap().ip())
             .map(|channel| {
                 // Each channel = one client connection
                 // All connections share the same ServerState
                 let server =
                     AgoraMetaServer::new(Arc::clone(&shared_state), Arc::clone(&bg_handle));
-                channel.execute(server.serve()).for_each(
-                    |fut| async {
-                        fut.await;
-                    },
-                )
+                channel.execute(server.serve()).for_each(|fut| async {
+                    fut.await;
+                })
             })
-            .buffer_unordered(32768)
+            .buffer_unordered(32768 * 1024)
             .for_each(|_| async {}) // Run forever
             .await;
 
@@ -130,7 +128,8 @@ impl AgoraMetaServer {
 impl Drop for AgoraMetaServer {
     fn drop(&mut self) {
         if Arc::strong_count(&self.bg_handle) == 1
-            && let Ok(handle_guard) = self.bg_handle.try_lock() {
+            && let Ok(handle_guard) = self.bg_handle.try_lock()
+        {
             handle_guard.abort();
             println!("Background pruning task stopped");
         }

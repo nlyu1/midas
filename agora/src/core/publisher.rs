@@ -18,7 +18,6 @@ use std::marker::PhantomData;
 /// 2. Initiate a `PingServer` which responds with last values. Metaserver holds a `PingClient` and confirms the publisher upon successful pinging at `/tmp/agora/{path}/ping.sock`.
 /// 3. Initiate `RawStreamServer`s for bytes and strings at `/tmp/agora/{path}/bytes/rawstream.sock` and `/tmp/agora/{path}/string/rawstream.sock`. These are relayed by the Gateway.
 pub struct Publisher<T: Agorable> {
-    _metaclient: AgoraClient,
     rawstream_byteserver: RawStreamServer<Vec<u8>>,
     rawstream_omniserver: RawStreamServer<String>,
     pingserver: PingServer,
@@ -98,7 +97,6 @@ impl<T: Agorable> Publisher<T> {
         })?;
 
         Ok(Self {
-            _metaclient: metaclient,
             rawstream_byteserver,
             rawstream_omniserver,
             pingserver,
@@ -125,8 +123,7 @@ impl<T: Agorable> Publisher<T> {
         let (vec_payload, str_payload) = Self::value_to_payloads(&value)?;
 
         // Update ping server (for health checks and get() calls)
-        self.pingserver
-            .update_payload(&vec_payload, &str_payload);
+        self.pingserver.update_payload(&vec_payload, &str_payload);
 
         // Broadcast to binary subscribers (Subscriber\<T>)
         self.rawstream_byteserver.publish(vec_payload)?;

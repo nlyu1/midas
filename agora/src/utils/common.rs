@@ -1,10 +1,10 @@
 //! Shared utilities for Agora: `ConnectionHandle` for network addressing, error macros (`agora_error!`, `agora_error_cause!`),
 //! path validation (`strip_and_verify`), and socket setup (`prepare_socket_path`). Used across all modules.
 
+use crate::{agora_error, agora_error_cause};
 use local_ip_address::local_ip;
 use std::fmt::{Display, Formatter};
 use std::net::IpAddr;
-use crate::{agora_error, agora_error_cause};
 
 /// Network address handle (IP + port) for gateway and metaserver connections.
 /// Serializable for RPC transmission in `PublisherInfo`. Used by `Publisher`, `Subscriber`, `Gateway` to establish connections.
@@ -21,7 +21,11 @@ pub type OrError<T> = Result<T, String>;
 #[macro_export]
 macro_rules! agora_error {
     ($component:expr, $method:expr, $msg:expr) => {
-        format!("Agora {} Error: {}", concat!($component, "::", $method), $msg)
+        format!(
+            "Agora {} Error: {}",
+            concat!($component, "::", $method),
+            $msg
+        )
     };
 }
 
@@ -29,8 +33,12 @@ macro_rules! agora_error {
 #[macro_export]
 macro_rules! agora_error_cause {
     ($component:expr, $method:expr, $msg:expr, $cause:expr) => {
-        format!("Agora {} Error: {}\nCaused by: {}",
-            concat!($component, "::", $method), $msg, $cause)
+        format!(
+            "Agora {} Error: {}. Caused by -> {}",
+            concat!($component, "::", $method),
+            $msg,
+            $cause
+        )
     };
 }
 
@@ -48,8 +56,14 @@ impl ConnectionHandle {
     }
 
     pub fn new_local(port: u16) -> OrError<Self> {
-        let addr =
-            local_ip().map_err(|e| agora_error_cause!("utils::ConnectionHandle", "new_local", "failed to get local IP", e))?;
+        let addr = local_ip().map_err(|e| {
+            agora_error_cause!(
+                "utils::ConnectionHandle",
+                "new_local",
+                "failed to get local IP",
+                e
+            )
+        })?;
         Ok(Self { addr, port })
     }
 
@@ -77,21 +91,41 @@ impl Display for ConnectionHandle {
 /// - No directory traversal (..)
 pub fn strip_and_verify(path_string: &str) -> OrError<String> {
     if path_string.is_empty() {
-        return Err(agora_error!("utils", "strip_and_verify", "path cannot be empty"));
+        return Err(agora_error!(
+            "utils",
+            "strip_and_verify",
+            "path cannot be empty"
+        ));
     }
     let stripped = path_string.trim_matches('/');
     if stripped.is_empty() {
-        return Err(agora_error!("utils", "strip_and_verify", "path cannot be empty after stripping slashes"));
+        return Err(agora_error!(
+            "utils",
+            "strip_and_verify",
+            "path cannot be empty after stripping slashes"
+        ));
     }
     if stripped.contains("//") {
-        return Err(agora_error!("utils", "strip_and_verify", "path cannot contain double slashes"));
+        return Err(agora_error!(
+            "utils",
+            "strip_and_verify",
+            "path cannot contain double slashes"
+        ));
     }
     if stripped.contains("..") {
-        return Err(agora_error!("utils", "strip_and_verify", "path cannot contain '..' (directory traversal)"));
+        return Err(agora_error!(
+            "utils",
+            "strip_and_verify",
+            "path cannot contain '..' (directory traversal)"
+        ));
     }
     for c in stripped.chars() {
         if !c.is_alphanumeric() && c != '-' && c != '_' && c != '/' {
-            return Err(agora_error!("utils", "strip_and_verify", &format!("path contains invalid character: '{}'", c)));
+            return Err(agora_error!(
+                "utils",
+                "strip_and_verify",
+                &format!("path contains invalid character: '{}'", c)
+            ));
         }
     }
 
@@ -101,14 +135,24 @@ pub fn strip_and_verify(path_string: &str) -> OrError<String> {
 pub fn prepare_socket_path(socket_path: &str) -> OrError<()> {
     let path = std::path::Path::new(socket_path);
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e|
-            agora_error_cause!("utils", "prepare_socket_path", "failed to create parent directory", e)
-        )?;
+        std::fs::create_dir_all(parent).map_err(|e| {
+            agora_error_cause!(
+                "utils",
+                "prepare_socket_path",
+                "failed to create parent directory",
+                e
+            )
+        })?;
     }
     if path.exists() {
-        std::fs::remove_file(path).map_err(|e|
-            agora_error_cause!("utils", "prepare_socket_path", "failed to remove existing socket file", e)
-        )?;
+        std::fs::remove_file(path).map_err(|e| {
+            agora_error_cause!(
+                "utils",
+                "prepare_socket_path",
+                "failed to remove existing socket file",
+                e
+            )
+        })?;
     }
     Ok(())
 }

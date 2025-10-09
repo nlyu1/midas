@@ -28,5 +28,5 @@ pub trait BinanceRest: Agorable + Sized {
 
 pub use bbo::BboUpdate;
 pub use orderbook::{OrderbookDepthUpdate, OrderbookDiffUpdate};
-pub use publisher::{BinanceWebstreamSymbol, BinanceWebstreamWorker};
+pub use publisher::{BinanceWebstreamSymbols, BinanceWebstreamWorker};
 pub use trades::TradeUpdate;

@@ -17,7 +17,6 @@ use std::pin::Pin;
 /// Requires: Publisher exists and is confirmed in metaserver.
 /// Network: Queries metaserver → connects to `ws://gateway/rawstream/{path}/bytes` → proxies to `/tmp/agora/{path}/bytes/rawstream.sock`.
 pub struct Subscriber<T: Agorable> {
-    _metaclient: AgoraClient,
     rawstreamclient: RawStreamClient<Vec<u8>>,
     pingclient: PingClient,
     _phantom: PhantomData<T>,
@@ -41,24 +40,23 @@ impl<T: Agorable> Subscriber<T> {
         let normalized_path = strip_and_verify(&path)?;
 
         // Step 2: Query metaserver for publisher location (pings publisher to verify alive)
-        let publisher_info = metaclient
-            .get_publisher_info(&normalized_path)
-            .await?;
+        let publisher_info = metaclient.get_publisher_info(&normalized_path).await?;
         let host_gateway_connection = *publisher_info.connection();
 
         // Step 3: Connect to binary endpoint (path/bytes for Subscriber\<T>)
         let bytes_path_str = format!("{}/bytes", normalized_path);
 
         let rawstreamclient: RawStreamClient<Vec<u8>> =
-            RawStreamClient::new(host_gateway_connection, &bytes_path_str, None, None)
-                .map_err(|e| {
+            RawStreamClient::new(host_gateway_connection, &bytes_path_str, None, None).map_err(
+                |e| {
                     agora_error_cause!(
                         "core::Subscriber",
                         "new",
                         "failed to create byte rawstream client",
                         e
                     )
-                })?;
+                },
+            )?;
 
         // Step 4: Create ping client for synchronous queries
         let pingclient = PingClient::new(&normalized_path, host_gateway_connection)
@@ -68,7 +66,6 @@ impl<T: Agorable> Subscriber<T> {
             })?;
 
         Ok(Self {
-            _metaclient: metaclient,
             rawstreamclient,
             pingclient,
             _phantom: PhantomData,
@@ -102,7 +99,7 @@ impl<T: Agorable> Subscriber<T> {
             agora_error_cause!(
                 "core::Subscriber",
                 "get_stream",
-                "failed to deserialize current value. If Omnisubscriber is succeeding, then double-check if published data type aligns with subscriber type.",
+                "failed to deserialize current value. If Omnisubscriber is succeeding, then double-check if published data type aligns with subscriber type",
                 e
             )
         })?;
@@ -160,28 +157,23 @@ impl OmniSubscriber {
 
         let normalized_path = strip_and_verify(&path)?;
 
-        let publisher_info = metaclient
-            .get_publisher_info(&normalized_path)
-            .await?;
+        let publisher_info = metaclient.get_publisher_info(&normalized_path).await?;
         let host_gateway_connection = *publisher_info.connection();
 
         // Connect to string endpoint (path/string for OmniSubscriber)
         let string_path_str = format!("{}/string", normalized_path);
 
-        let rawstreamclient: RawStreamClient<String> = RawStreamClient::new(
-            host_gateway_connection,
-            &string_path_str,
-            None,
-            None,
-        )
-        .map_err(|e| {
-            agora_error_cause!(
-                "core::OmniSubscriber",
-                "new",
-                "failed to create string rawstream client",
-                e
-            )
-        })?;
+        let rawstreamclient: RawStreamClient<String> =
+            RawStreamClient::new(host_gateway_connection, &string_path_str, None, None).map_err(
+                |e| {
+                    agora_error_cause!(
+                        "core::OmniSubscriber",
+                        "new",
+                        "failed to create string rawstream client",
+                        e
+                    )
+                },
+            )?;
 
         let pingclient = PingClient::new(&normalized_path, host_gateway_connection)
             .await

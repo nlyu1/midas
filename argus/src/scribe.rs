@@ -1,15 +1,18 @@
+use agora::AgorableOption;
 use agora::utils::OrError;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
-mod file;
-pub use file::{AgoraDirScribe, SinglePathScribe};
+mod archiver;
+mod tempfile;
+pub use archiver::Archiver;
+pub use tempfile::{AgoraDirScribe, SinglePathScribe};
 
 /// Trait for writing Rust structs to Parquet files with DuckDB compatibility
 ///
 /// Uses Apache Arrow for schema definition and efficient columnar storage.
 /// Implements datetime handling with UTC timestamps and supports nested data structures.
-pub trait ArgusParquetable: Sized {
+pub trait ArgusParquetable: Sized + Clone + Send + Sync + 'static {
     /// Returns the Arrow schema for this type.
     ///
     /// Use:
@@ -32,11 +35,11 @@ pub trait ArgusParquetable: Sized {
     ///
     /// Default implementation uses Snappy compression and writes a single RecordBatch.
     /// Override for custom behavior (e.g., batching, different compression).
-    fn write_to_parquet(data: Vec<Self>, output_path: &std::path::Path) -> OrError<()> {
+    fn write_to_parquet(data: Vec<Self>, output_path: String) -> OrError<()> {
         let schema = Self::arrow_schema();
         let batch = Self::to_record_batch(data)?;
 
-        let file = std::fs::File::create(output_path)
+        let file = std::fs::File::create(&output_path)
             .map_err(|e| format!("Failed to create file {:?}: {}", output_path, e))?;
 
         let props = WriterProperties::builder()
@@ -55,5 +58,24 @@ pub trait ArgusParquetable: Sized {
             .map_err(|e| format!("Failed to close writer: {}", e))?;
 
         Ok(())
+    }
+}
+
+/// Blanket implementation of ArgusParquetable for AgorableOption<T>
+///
+/// This implementation automatically works for any T that implements ArgusParquetable.
+/// It filters out None values and delegates to the inner type's implementation.
+impl<T> ArgusParquetable for AgorableOption<T>
+where
+    T: ArgusParquetable,
+{
+    fn arrow_schema() -> std::sync::Arc<arrow::datatypes::Schema> {
+        T::arrow_schema()
+    }
+
+    fn to_record_batch(data: Vec<Self>) -> OrError<arrow::record_batch::RecordBatch> {
+        // Filter out None values and unwrap Some values
+        let inner_data: Vec<T> = data.into_iter().filter_map(|opt| opt.0).collect();
+        T::to_record_batch(inner_data)
     }
 }

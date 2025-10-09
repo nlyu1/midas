@@ -123,14 +123,14 @@ class PerpDataCollector:
             # Trades - individual executions
             await self._subscribe({"type": "trades", "coin": coin})
             
-            # BBO - best bid/offer
-            await self._subscribe({"type": "bbo", "coin": coin})
+        #     # BBO - best bid/offer
+        #     await self._subscribe({"type": "bbo", "coin": coin})
             
-            # Active asset context - funding, mark price, OI
-            await self._subscribe({"type": "activeAssetCtx", "coin": coin})
+        #     # Active asset context - funding, mark price, OI
+        #     await self._subscribe({"type": "activeAssetCtx", "coin": coin})
         
-        # Also subscribe to allMids for quick price overview
-        await self._subscribe({"type": "allMids"})
+        # # Also subscribe to allMids for quick price overview
+        # await self._subscribe({"type": "allMids"})
         
         print(f"\n✓ Subscribed to {len(self.coins) * 3 + 1} feeds")
     

@@ -52,9 +52,14 @@ impl ServerState {
         // Check for duplicate registration
         if self.publishers.contains_key(&path) {
             let publisher_info = self.publishers.get(&path).unwrap();
-            return Err(agora_error!("metaserver::ServerState", "register_publisher",
-                &format!("publisher {:?} already registered at {}. Check path or use `update` instead",
-                    publisher_info, path)));
+            return Err(agora_error!(
+                "metaserver::ServerState",
+                "register_publisher",
+                &format!(
+                    "publisher {:?} already registered at {}. Check path or use `update` instead",
+                    publisher_info, path
+                )
+            ));
         }
 
         // Invariant: All parent paths must be directories (not publishers)
@@ -62,8 +67,14 @@ impl ServerState {
 
         // Path must be new (not existing directory node)
         if self.path_tree.get_child(&path).is_ok() {
-            return Err(agora_error!("metaserver::ServerState", "register_publisher",
-                &format!("path '{}' already exists as a directory in the tree. Publishers can only be registered at new paths", path)));
+            return Err(agora_error!(
+                "metaserver::ServerState",
+                "register_publisher",
+                &format!(
+                    "path '{}' already exists as a directory in the tree. Publishers can only be registered at new paths",
+                    path
+                )
+            ));
         }
 
         // Create directory nodes for path segments
@@ -73,7 +84,8 @@ impl ServerState {
         self.publishers.insert(path, publisher_info.clone());
         println!(
             "Registered publisher {:?} at path {}",
-            &publisher_info.name(), &publisher_info.path()
+            &publisher_info.name(),
+            &publisher_info.path()
         );
         Ok(publisher_info)
     }
@@ -84,13 +96,19 @@ impl ServerState {
     /// Called by: `AgoraMetaServer` (TARPC) ← `AgoraClient::confirm_publisher` ← `Publisher::new`
     pub async fn confirm_publisher(&mut self, path: &str) -> OrError<()> {
         if !self.publishers.contains_key(path) {
-            return Err(agora_error!("metaserver::ServerState", "confirm_publisher",
-                &format!("please register path {} before confirming", path)));
+            return Err(agora_error!(
+                "metaserver::ServerState",
+                "confirm_publisher",
+                &format!("please register path {} before confirming", path)
+            ));
         }
 
         if self.confirmed_publishers.contains_key(path) {
-            return Err(agora_error!("metaserver::ServerState", "confirm_publisher",
-                &format!("path {} already registered and confirmed", path)));
+            return Err(agora_error!(
+                "metaserver::ServerState",
+                "confirm_publisher",
+                &format!("path {} already registered and confirmed", path)
+            ));
         }
 
         let publisher_info = self.publishers.get(path).unwrap();
@@ -104,8 +122,12 @@ impl ServerState {
                     "Removed registered publisher {} upon unsuccessful confirmation",
                     path
                 );
-                agora_error_cause!("metaserver::ServerState", "confirm_publisher",
-                    "failed to create ping client. Are you running the gateway?", e)
+                agora_error_cause!(
+                    "metaserver::ServerState",
+                    "confirm_publisher",
+                    "failed to create ping client. Are you running the gateway?",
+                    e
+                )
             })?;
 
         // Test ping - if fails, auto-remove registration
@@ -119,7 +141,8 @@ impl ServerState {
 
         // Success: store ping client for health checks
         println!("Publisher {} confirmed.", path);
-        self.confirmed_publishers.insert(path.to_string(), pingclient);
+        self.confirmed_publishers
+            .insert(path.to_string(), pingclient);
         Ok(())
     }
 
@@ -137,8 +160,11 @@ impl ServerState {
                 self.confirmed_publishers.remove(path);
                 Ok(publisher_info)
             }
-            None => Err(agora_error!("metaserver::ServerState", "remove_publisher",
-                &format!("path '{}' is not associated with any publishers", path))),
+            None => Err(agora_error!(
+                "metaserver::ServerState",
+                "remove_publisher",
+                &format!("path '{}' is not associated with any publishers", path)
+            )),
         }
     }
 
@@ -158,50 +184,89 @@ impl ServerState {
         ) {
             (Some(publisher), Some(pingclient)) => {
                 // Ping before returning to ensure publisher is alive
-                pingclient
-                    .ping()
-                    .await
-                    .map_err(|e| agora_error_cause!("metaserver::ServerState", "get_publisher_info",
-                        &format!("cannot ping {}. Publisher might be stale", path), e))?;
+                pingclient.ping().await.map_err(|e| {
+                    agora_error_cause!(
+                        "metaserver::ServerState",
+                        "get_publisher_info",
+                        &format!("cannot ping {}. Publisher might be stale", path),
+                        e
+                    )
+                })?;
                 Ok(publisher.clone())
             }
-            (Some(_), None) => Err(agora_error!("metaserver::ServerState", "get_publisher_info",
-                &format!("publisher at {} is registered but not confirmed", path))),
-            (None, _) => Err(agora_error!("metaserver::ServerState", "get_publisher_info",
-                &format!("publisher not registered at {}", path))),
+            (Some(_), None) => Err(agora_error!(
+                "metaserver::ServerState",
+                "get_publisher_info",
+                &format!("publisher at {} is registered but not confirmed", path)
+            )),
+            (None, _) => Err(agora_error!(
+                "metaserver::ServerState",
+                "get_publisher_info",
+                &format!("publisher not registered at {}", path)
+            )),
         }
     }
 
     fn validate_path_format(&self, path: &str) -> OrError<()> {
         if path.is_empty() {
-            return Err(agora_error!("metaserver::ServerState", "validate_path_format",
-                "path cannot be empty"));
+            return Err(agora_error!(
+                "metaserver::ServerState",
+                "validate_path_format",
+                "path cannot be empty"
+            ));
         }
 
         if path.starts_with('/') {
-            return Err(agora_error!("metaserver::ServerState", "validate_path_format",
-                &format!("path '{}' cannot start with '/' - use relative paths only", path)));
+            return Err(agora_error!(
+                "metaserver::ServerState",
+                "validate_path_format",
+                &format!(
+                    "path '{}' cannot start with '/' - use relative paths only",
+                    path
+                )
+            ));
         }
         if path.ends_with('/') {
-            return Err(agora_error!("metaserver::ServerState", "validate_path_format",
-                &format!("path '{}' cannot end with '/' - trailing slashes not allowed", path)));
+            return Err(agora_error!(
+                "metaserver::ServerState",
+                "validate_path_format",
+                &format!(
+                    "path '{}' cannot end with '/' - trailing slashes not allowed",
+                    path
+                )
+            ));
         }
 
         if path.contains("//") {
-            return Err(agora_error!("metaserver::ServerState", "validate_path_format",
-                &format!("path '{}' contains double slashes '//' - not allowed", path)));
+            return Err(agora_error!(
+                "metaserver::ServerState",
+                "validate_path_format",
+                &format!("path '{}' contains double slashes '//' - not allowed", path)
+            ));
         }
 
         let segments: Vec<&str> = path.split('/').collect();
         for (i, segment) in segments.iter().enumerate() {
             if segment.is_empty() {
-                return Err(agora_error!("metaserver::ServerState", "validate_path_format",
-                    &format!("path '{}' has empty segment at position {} - not allowed", path, i)));
+                return Err(agora_error!(
+                    "metaserver::ServerState",
+                    "validate_path_format",
+                    &format!(
+                        "path '{}' has empty segment at position {} - not allowed",
+                        path, i
+                    )
+                ));
             }
 
             if segment.trim() != *segment {
-                return Err(agora_error!("metaserver::ServerState", "validate_path_format",
-                    &format!("path segment '{}' has leading/trailing whitespace - not allowed", segment)));
+                return Err(agora_error!(
+                    "metaserver::ServerState",
+                    "validate_path_format",
+                    &format!(
+                        "path segment '{}' has leading/trailing whitespace - not allowed",
+                        segment
+                    )
+                ));
             }
         }
 
@@ -228,8 +293,14 @@ impl ServerState {
 
             // Error if parent is a publisher
             if self.publishers.contains_key(&current_path) {
-                return Err(agora_error!("metaserver::ServerState", "validate_parent_paths_are_directories",
-                    &format!("path parent should all be directories, but '{}' is associated with a publisher. Consider removing first", current_path)));
+                return Err(agora_error!(
+                    "metaserver::ServerState",
+                    "validate_parent_paths_are_directories",
+                    &format!(
+                        "path parent should all be directories, but '{}' is associated with a publisher. Consider removing first",
+                        current_path
+                    )
+                ));
             }
         }
 
@@ -248,7 +319,8 @@ impl ServerState {
         // Ping each publisher - collect failures
         for path in paths_to_check {
             if let Some(ping_client) = self.confirmed_publishers.get_mut(&path)
-                && let Err(_) = ping_client.ping().await {
+                && let Err(_) = ping_client.ping().await
+            {
                 stale_paths.push(path);
             }
         }

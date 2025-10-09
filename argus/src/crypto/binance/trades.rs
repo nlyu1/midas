@@ -1,5 +1,5 @@
 use super::BinanceStreamable;
-use crate::scribe::ArgusParquetable; 
+use crate::scribe::ArgusParquetable;
 use crate::types::{Price, TradeSize, TradingSymbol};
 use agora::Agorable;
 use agora::utils::OrError;
@@ -82,7 +82,7 @@ struct RawTradeUpdate {
     #[serde(rename = "a")]
     seller_order_id: u64,
     #[serde(rename = "T")]
-    trade_time_ms: u64,
+    _trade_time_ms: u64,
     #[serde(rename = "m")]
     is_buyer_maker: bool,
 }

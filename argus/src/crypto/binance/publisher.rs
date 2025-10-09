@@ -2,12 +2,10 @@ use super::{BboUpdate, BinanceStreamable, OrderbookDiffUpdate, TradeUpdate};
 use crate::constants::BINANCE_SPOT_WEBSTREAM_ENDPOINT;
 use crate::types::TradingSymbol;
 use agora::utils::OrError;
-use agora::{AgorableOption, Publisher};
+use agora::{AgorableOption, ConnectionHandle, Publisher};
 use futures_util::{SinkExt, StreamExt};
-// use rand::Rng;
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::net::Ipv6Addr;
 use tokio::task::JoinHandle;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -19,10 +17,10 @@ pub struct BinanceWebstreamWorker<T: BinanceStreamable> {
 
 impl<T: BinanceStreamable> BinanceWebstreamWorker<T> {
     pub async fn new(
-        metaserver_addr: Ipv6Addr,
-        metaserver_port: u16,
-        agora_prefix: String,
         symbols: &[TradingSymbol],
+        agora_prefix: &str,
+        metaserver_connection: ConnectionHandle,
+        local_gateway_port: u16,
     ) -> OrError<Self> {
         if symbols.is_empty() {
             return Err("BinanceWebstreamWorker error: symbols list cannot be empty".to_string());
@@ -33,11 +31,6 @@ impl<T: BinanceStreamable> BinanceWebstreamWorker<T> {
                     .to_string(),
             );
         }
-
-        // let mut rng = rand::rng();
-        // let random_hash: String = (0..6)
-        //     .map(|_| rng.sample(rand::distr::Alphanumeric) as char)
-        //     .collect();
 
         // Agora paths for each symbol
         let agora_paths: Vec<String> = symbols
@@ -61,8 +54,8 @@ impl<T: BinanceStreamable> BinanceWebstreamWorker<T> {
                 publisher_name,
                 agora_path.clone(),
                 AgorableOption(None),
-                metaserver_addr,
-                metaserver_port,
+                metaserver_connection,
+                local_gateway_port,
             )
             .await?;
             publishers.push(publisher);
@@ -195,44 +188,51 @@ impl<T: BinanceStreamable> Drop for BinanceWebstreamWorker<T> {
     }
 }
 
-pub struct BinanceWebstreamSymbol {
-    trade_worker: BinanceWebstreamWorker<TradeUpdate>,
-    bbo_worker: BinanceWebstreamWorker<BboUpdate>,
-    orderbookdiff_worker: BinanceWebstreamWorker<OrderbookDiffUpdate>,
+// We need to hold internal references to these workers, because dropping them would stop streaming.
+pub struct BinanceWebstreamSymbols {
+    symbols: Vec<TradingSymbol>,
+    _trade_worker: BinanceWebstreamWorker<TradeUpdate>,
+    _bbo_worker: BinanceWebstreamWorker<BboUpdate>,
+    _orderbookdiff_worker: BinanceWebstreamWorker<OrderbookDiffUpdate>,
 }
 
-impl BinanceWebstreamSymbol {
+impl BinanceWebstreamSymbols {
     pub async fn new(
-        metaserver_addr: Ipv6Addr,
-        metaserver_port: u16,
-        agora_prefix: String,
         symbols: &[TradingSymbol],
+        agora_prefix: &str,
+        metaserver_connection: ConnectionHandle,
+        local_gateway_port: u16,
     ) -> OrError<Self> {
         let trade_worker = BinanceWebstreamWorker::<TradeUpdate>::new(
-            metaserver_addr,
-            metaserver_port,
-            agora_prefix.clone(),
             symbols,
+            agora_prefix,
+            metaserver_connection.clone(),
+            local_gateway_port,
         )
         .await?;
         let orderbookdiff_worker = BinanceWebstreamWorker::<OrderbookDiffUpdate>::new(
-            metaserver_addr,
-            metaserver_port,
-            agora_prefix.clone(),
             symbols,
+            agora_prefix,
+            metaserver_connection.clone(),
+            local_gateway_port,
         )
         .await?;
         let bbo_worker = BinanceWebstreamWorker::<BboUpdate>::new(
-            metaserver_addr,
-            metaserver_port,
-            agora_prefix,
             symbols,
+            agora_prefix,
+            metaserver_connection.clone(),
+            local_gateway_port,
         )
         .await?;
         Ok(Self {
-            trade_worker,
-            bbo_worker,
-            orderbookdiff_worker,
+            symbols: symbols.to_vec(),
+            _trade_worker: trade_worker,
+            _bbo_worker: bbo_worker,
+            _orderbookdiff_worker: orderbookdiff_worker,
         })
+    }
+
+    pub fn symbols(&self) -> &[TradingSymbol] {
+        &self.symbols
     }
 }

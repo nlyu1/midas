@@ -1,9 +1,13 @@
 # Argus
 
-Argus is a central observational service for ingesting, recording, and publishing marketdata across a wide range of data sources
+Argus is a central observational service for ingesting, recording, and publishing marketdata across a wide range of data sources. Let's take the hyperliquid example, which publishes both spot and perpetuals data: 
 
-1. **Ingestion**: subscribes to each data source (exchange) and 
-    - Saves to `ARGUS_DATA_PATH/{source}/{data_type}/{symbol}/{year}/{date}.pq
+1. A versioned webstream publisher (`hyperliquid/publisher.rs`) manages symbol subscriptions and publishes to `argus/tmp/hyperliquid/{spot | perp}_{version}/{data type}/{symbol}
+    - Data type could be Bbo, LastTrade, Orderbook updates etc. 
+2. Webstream publishers are batched together and managed by a versioned hyperliquid manager instance, which keeps track of a snapshot. 
+3. The hyperliquid manager instance also maintains a universe manager, which pings once every ??? to obtain a list of the active universe. 
+    - It manages a stable path to `argus/hyperliquid/{spot | perp}/{data type}/{symbol}`, which is non-versioned as a relay endpoint. 
+    - Upon universe change, a new version is swapped. 
 
 
 ## Abstraction

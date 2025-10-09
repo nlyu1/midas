@@ -1,9 +1,7 @@
 use agora::utils::OrError;
-use priority_queue::PriorityQueue;
 use serde::{Deserialize, Serialize};
-use std::cmp::Reverse;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TradingSymbol(String);
 
 impl TradingSymbol {
@@ -67,9 +65,3 @@ impl TradeSize {
 }
 
 pub type PriceLevel = (Price, TradeSize);
-
-pub struct OrderBook {
-    pub symbol: String,
-    bids: PriorityQueue<PriceLevel, Price>, // Best bid should be first
-    asks: PriorityQueue<PriceLevel, Reverse<Price>>, // Best offer should be first
-}
