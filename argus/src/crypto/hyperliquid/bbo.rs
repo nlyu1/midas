@@ -1,8 +1,9 @@
 use super::HyperliquidStreamable;
-use crate::scribe::ArgusParquetable;
+use crate::ArgusParquetable; 
 use crate::types::{Price, TradeSize, TradingSymbol};
 use agora::Agorable;
 use agora::utils::OrError;
+use bimap::BiMap;
 use chrono::prelude::{DateTime, Utc};
 use indoc::writedoc;
 use serde::{Deserialize, Serialize};
@@ -65,14 +66,16 @@ struct WsLevel {
 
 #[derive(Deserialize)]
 struct RawBboUpdate {
-    #[allow(dead_code)]
-    coin: String,
+    coin: String, // Used for symbol extraction and mapping
     time: u64,
     bbo: [Option<WsLevel>; 2],
 }
 
 impl HyperliquidStreamable for BboUpdate {
-    fn of_channel_data(data: serde_json::Value, coin: &str) -> OrError<Self> {
+    fn of_channel_data(
+        data: serde_json::Value,
+        symbol_map: &BiMap<TradingSymbol, TradingSymbol>,
+    ) -> OrError<Vec<Self>> {
         let received_time = Utc::now();
         let raw: RawBboUpdate = serde_json::from_value(data).map_err(|e| {
             format!(
@@ -80,6 +83,13 @@ impl HyperliquidStreamable for BboUpdate {
                 e
             )
         })?;
+
+        // Extract coin from data and normalize
+        let hyperliquid_coin = TradingSymbol::from_str(&raw.coin)?;
+        let normalized_symbol = symbol_map
+            .get_by_right(&hyperliquid_coin)
+            .cloned()
+            .unwrap_or(hyperliquid_coin);
 
         // Extract bid and ask from the bbo array
         let bid = raw.bbo[0]
@@ -90,7 +100,7 @@ impl HyperliquidStreamable for BboUpdate {
             .ok_or("Argus Hyperliquid BboUpdate: missing ask level")?;
 
         let bbo_update = BboUpdate {
-            symbol: TradingSymbol::from_str(coin)?,
+            symbol: normalized_symbol,
             received_time,
             time: DateTime::from_timestamp_millis(raw.time as i64).ok_or("Invalid timestamp")?,
             bid_price: Price::from_string(bid.px.clone())?,
@@ -100,7 +110,9 @@ impl HyperliquidStreamable for BboUpdate {
             ask_size: TradeSize::from_string(ask.sz.clone())?,
             ask_orders: ask.n,
         };
-        Ok(bbo_update)
+
+        // Return single item in a vector
+        Ok(vec![bbo_update])
     }
 
     fn subscription_type() -> String {

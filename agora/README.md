@@ -44,6 +44,12 @@ Agora is a distributed publisher-subscriber messaging system built with path-bas
    cargo run --bin metaclient -- --host 192.168.0.75
    ```
 
+**"too many open files"** os error:
+
+- When there are too many publishers, the metaserver's managed sockets result in too many open files. 
+- To solve this problem, precede any agora script with `ulimit -n 65536`. 
+- To see the process's open-file limit, run `cat /proc/{pid}/limits`. Run `lsof -p {pid}` to get the current number of open files. 
+
 ## Python Integration
 
 Agora provides Python bindings through PyO3 and Maturin, supporting typed publishers and subscribers.

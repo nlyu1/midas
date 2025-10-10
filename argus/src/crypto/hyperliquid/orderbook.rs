@@ -1,8 +1,9 @@
 use super::HyperliquidStreamable;
-use crate::scribe::ArgusParquetable;
+use crate::ArgusParquetable; 
 use crate::types::{Price, TradeSize, TradingSymbol};
 use agora::Agorable;
 use agora::utils::OrError;
+use bimap::BiMap;
 use chrono::prelude::{DateTime, Utc};
 use indoc::writedoc;
 use serde::{Deserialize, Serialize};
@@ -61,14 +62,16 @@ struct WsLevel {
 
 #[derive(Deserialize)]
 struct RawOrderbookSnapshot {
-    #[allow(dead_code)]
-    coin: String,
+    coin: String, // Used for symbol extraction and mapping
     time: u64,
     levels: [Vec<WsLevel>; 2],
 }
 
 impl HyperliquidStreamable for OrderbookSnapshot {
-    fn of_channel_data(data: serde_json::Value, coin: &str) -> OrError<Self> {
+    fn of_channel_data(
+        data: serde_json::Value,
+        symbol_map: &BiMap<TradingSymbol, TradingSymbol>,
+    ) -> OrError<Vec<Self>> {
         let received_time = Utc::now();
         let raw: RawOrderbookSnapshot = serde_json::from_value(data).map_err(|e| {
             format!(
@@ -76,6 +79,13 @@ impl HyperliquidStreamable for OrderbookSnapshot {
                 e
             )
         })?;
+
+        // Extract coin from data and normalize
+        let hyperliquid_coin = TradingSymbol::from_str(&raw.coin)?;
+        let normalized_symbol = symbol_map
+            .get_by_right(&hyperliquid_coin)
+            .cloned()
+            .unwrap_or(hyperliquid_coin);
 
         // Parse bid levels
         let mut bid_levels = Vec::new();
@@ -94,13 +104,15 @@ impl HyperliquidStreamable for OrderbookSnapshot {
         }
 
         let orderbook = OrderbookSnapshot {
-            symbol: TradingSymbol::from_str(coin)?,
+            symbol: normalized_symbol,
             received_time,
             time: DateTime::from_timestamp_millis(raw.time as i64).ok_or("Invalid timestamp")?,
             bid_levels,
             ask_levels,
         };
-        Ok(orderbook)
+
+        // Return single item in a vector
+        Ok(vec![orderbook])
     }
 
     fn subscription_type() -> String {

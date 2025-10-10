@@ -1,8 +1,9 @@
 use super::HyperliquidStreamable;
-use crate::scribe::ArgusParquetable;
+use crate::recording::ArgusParquetable;
 use crate::types::{Price, TradeSize, TradingSymbol};
 use agora::utils::OrError;
 use agora::Agorable;
+use bimap::BiMap;
 use chrono::prelude::{DateTime, Utc};
 use indoc::writedoc;
 use serde::{Deserialize, Serialize};
@@ -55,8 +56,7 @@ impl Agorable for TradeUpdate {}
 /// }
 #[derive(Deserialize)]
 struct RawTradeUpdate {
-    #[allow(dead_code)]
-    coin: String,
+    coin: String, // Used for symbol extraction and mapping
     side: String,
     px: String,
     sz: String,
@@ -65,50 +65,65 @@ struct RawTradeUpdate {
 }
 
 impl HyperliquidStreamable for TradeUpdate {
-    fn of_channel_data(data: serde_json::Value, coin: &str) -> OrError<Self> {
+    fn of_channel_data(
+        data: serde_json::Value,
+        symbol_map: &BiMap<TradingSymbol, TradingSymbol>,
+    ) -> OrError<Vec<Self>> {
         let received_time = Utc::now();
 
-        // Hyperliquid sends trades as an array, we need to handle multiple trades
-        // For now, we'll return error if it's not a single trade or pick the first
-        let trades: Vec<RawTradeUpdate> = serde_json::from_value(data).map_err(|e| {
+        // Hyperliquid sends trades as an array: [{coin, px, sz, ...}, ...]
+        let raw_trades: Vec<RawTradeUpdate> = serde_json::from_value(data).map_err(|e| {
             format!(
                 "Argus Hyperliquid tradeUpdate conversion error: cannot convert data into Vec<RawTradeUpdate>. Check schema. {}",
                 e
             )
         })?;
 
-        if trades.is_empty() {
+        if raw_trades.is_empty() {
             return Err("Argus Hyperliquid tradeUpdate: empty trades array".to_string());
         }
 
-        // Take the first trade (we'll handle multiple trades in the publisher)
-        let raw = &trades[0];
+        // Extract coin from first trade and normalize
+        // All trades in the same message are for the same symbol
+        let hyperliquid_coin = TradingSymbol::from_str(&raw_trades[0].coin)?;
+        let normalized_symbol = symbol_map
+            .get_by_right(&hyperliquid_coin)
+            .cloned()
+            .unwrap_or(hyperliquid_coin);
 
-        let price: f64 = raw.px.parse().map_err(|e| {
-            format!(
-                "Argus Hyperliquid tradeUpdate conversion error: parsed price {} cannot be converted to f64. {}",
-                raw.px, e
-            )
-        })?;
+        // Parse ALL trades in the array (critical fix!)
+        let mut parsed_trades = Vec::new();
 
-        let size: f64 = raw.sz.parse().map_err(|e| {
-            format!(
-                "Argus Hyperliquid tradeUpdate conversion error: parsed size {} cannot be converted to f64. {}",
-                raw.sz, e
-            )
-        })?;
+        for raw in raw_trades {
+            let price: f64 = raw.px.parse().map_err(|e| {
+                format!(
+                    "Argus Hyperliquid tradeUpdate conversion error: parsed price {} cannot be converted to f64. {}",
+                    raw.px, e
+                )
+            })?;
 
-        let trade_update = TradeUpdate {
-            symbol: TradingSymbol::from_str(coin)?,
-            received_time,
-            trade_id: raw.tid,
-            price: Price::from_f64(price)?,
-            size: TradeSize::from_f64(size)?,
-            trade_time: DateTime::from_timestamp_millis(raw.time as i64)
-                .ok_or("Invalid trade time")?,
-            is_buy: raw.side == "B",
-        };
-        Ok(trade_update)
+            let size: f64 = raw.sz.parse().map_err(|e| {
+                format!(
+                    "Argus Hyperliquid tradeUpdate conversion error: parsed size {} cannot be converted to f64. {}",
+                    raw.sz, e
+                )
+            })?;
+
+            let trade_update = TradeUpdate {
+                symbol: normalized_symbol.clone(),
+                received_time,
+                trade_id: raw.tid,
+                price: Price::from_f64(price)?,
+                size: TradeSize::from_f64(size)?,
+                trade_time: DateTime::from_timestamp_millis(raw.time as i64)
+                    .ok_or("Invalid trade time")?,
+                is_buy: raw.side == "B",
+            };
+
+            parsed_trades.push(trade_update);
+        }
+
+        Ok(parsed_trades)
     }
 
     fn subscription_type() -> String {

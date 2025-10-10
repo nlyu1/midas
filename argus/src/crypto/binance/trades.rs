@@ -1,5 +1,5 @@
 use super::BinanceStreamable;
-use crate::scribe::ArgusParquetable;
+use crate::ArgusParquetable; 
 use crate::types::{Price, TradeSize, TradingSymbol};
 use agora::Agorable;
 use agora::utils::OrError;

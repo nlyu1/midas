@@ -1,5 +1,5 @@
 use argus::constants::ARGUS_DATA_PATH;
-use argus::scribe::Archiver;
+use argus::Archiver;
 use indoc::indoc;
 use std::io::{self, Write};
 

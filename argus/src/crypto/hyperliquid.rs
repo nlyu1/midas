@@ -2,10 +2,7 @@ mod bbo;
 mod orderbook;
 mod perp_context;
 mod publisher;
-mod scribe {
-    pub use super::writer::*;
-}
-mod writer;
+mod scribe; 
 mod spot_context;
 mod trades;
 mod universe;
@@ -14,18 +11,24 @@ pub mod webstream;
 use crate::types::TradingSymbol;
 use agora::Agorable;
 use agora::utils::OrError;
+use bimap::BiMap;
 use serde::Deserialize;
 
-// Data from websocket endpoints
 pub trait HyperliquidStreamable: Agorable + Sized {
-    fn of_channel_data(data: serde_json::Value, coin: &str) -> OrError<Self>;
+    /// Parse channel data into one or more instances.
+    /// Each implementation extracts symbol from its data structure, translates via symbol_map,
+    /// and embeds the normalized symbol in returned items.
+    /// Returns Vec<Self>: single-object types return vec![item], array types return all items.
+    fn of_channel_data(
+        data: serde_json::Value,
+        symbol_map: &BiMap<TradingSymbol, TradingSymbol>,
+    ) -> OrError<Vec<Self>>;
+
     fn subscription_type() -> String;
     fn payload_identifier() -> String;
-    fn symbol(&self) -> TradingSymbol; // Returns the symbol of current payload
+    fn symbol(&self) -> TradingSymbol;
 }
 
-/// Wrapper for Hyperliquid WebSocket messages
-/// All messages come in format: {"channel": "...", "data": ...}
 #[derive(Deserialize)]
 pub struct ChannelMessage {
     pub channel: String,

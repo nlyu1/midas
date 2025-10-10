@@ -1,8 +1,9 @@
 use super::HyperliquidStreamable;
-use crate::scribe::ArgusParquetable;
+use crate::ArgusParquetable;
 use crate::types::{Price, TradingSymbol};
 use agora::Agorable;
 use agora::utils::OrError;
+use bimap::BiMap;
 use chrono::prelude::{DateTime, Utc};
 use indoc::writedoc;
 use serde::{Deserialize, Serialize};
@@ -73,15 +74,19 @@ struct RawSpotAssetCtx {
     total_supply: Option<String>,
 }
 
+// Context, bbo, orderbook, last-trade
+
 #[derive(Deserialize)]
 struct RawSpotAssetContext {
-    #[allow(dead_code)]
-    coin: String,
+    coin: String, // Used for symbol extraction and mapping
     ctx: RawSpotAssetCtx,
 }
 
 impl HyperliquidStreamable for SpotAssetContext {
-    fn of_channel_data(data: serde_json::Value, coin: &str) -> OrError<Self> {
+    fn of_channel_data(
+        data: serde_json::Value,
+        symbol_map: &BiMap<TradingSymbol, TradingSymbol>,
+    ) -> OrError<Vec<Self>> {
         let received_time = Utc::now();
         let raw: RawSpotAssetContext = serde_json::from_value(data).map_err(|e| {
             format!(
@@ -89,6 +94,13 @@ impl HyperliquidStreamable for SpotAssetContext {
                 e
             )
         })?;
+
+        // Extract coin from data and normalize
+        let hyperliquid_coin = TradingSymbol::from_str(&raw.coin)?;
+        let normalized_symbol = symbol_map
+            .get_by_right(&hyperliquid_coin)
+            .cloned()
+            .unwrap_or(hyperliquid_coin);
 
         let mark_price = Price::from_string(raw.ctx.mark_px)?;
 
@@ -132,7 +144,7 @@ impl HyperliquidStreamable for SpotAssetContext {
         };
 
         let context = SpotAssetContext {
-            symbol: TradingSymbol::from_str(coin)?,
+            symbol: normalized_symbol,
             received_time,
             mark_price,
             mid_price,
@@ -140,7 +152,9 @@ impl HyperliquidStreamable for SpotAssetContext {
             circulating_supply,
             total_supply,
         };
-        Ok(context)
+
+        // Return single item in a vector
+        Ok(vec![context])
     }
 
     fn subscription_type() -> String {

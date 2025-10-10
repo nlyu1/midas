@@ -1,7 +1,7 @@
 use agora::{AgorableOption, ConnectionHandle};
 use argus::constants::{AGORA_METASERVER_DEFAULT_PORT, ARGUS_DATA_PATH};
 use argus::crypto::hyperliquid::BboUpdate;
-use argus::scribe::AgoraDirScribe;
+use argus::AgoraDirScribe;
 use std::io::{self, Write};
 use std::time::Duration;
 

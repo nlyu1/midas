@@ -9,6 +9,7 @@
 // Archiver is responsible for systematically moving temp files into this organized structure.
 // TODO: add flushing summary.
 
+use crate::constants::HYPERLIQUID_ARCHIVER_FLUSH_INTERVAL_SECONDS;
 use crate::types::TradingSymbol;
 use agora::utils::OrError;
 use chrono::{DateTime, Duration, Local, NaiveDateTime, TimeZone};
@@ -121,7 +122,9 @@ impl Archiver {
         target_dir: String,
         last_updates: Arc<RwLock<HashMap<DataType, HashMap<TradingSymbol, DateTime<Local>>>>>,
     ) {
-        let mut interval = time::interval(time::Duration::from_secs(10));
+        let mut interval = time::interval(time::Duration::from_secs(
+            HYPERLIQUID_ARCHIVER_FLUSH_INTERVAL_SECONDS,
+        ));
 
         loop {
             interval.tick().await;
@@ -199,17 +202,29 @@ impl Archiver {
                 let updates = last_updates.read().unwrap();
                 updates.get(&data_type).unwrap().clone()
             };
+            let mut flushed_file_count = 0;
+            let mut flushed_record_count = 0;
 
             for (filepath, symbol, timestamp) in files_with_metadata {
                 if let Some(latest_time) = last_updates_snapshot.get(&symbol) {
                     if timestamp < *latest_time {
                         // This file is older than the latest, safe to flush
-                        if let Err(e) = Self::flush_tmp_file(&filepath, &target_dir).await {
-                            eprintln!("Failed to flush {}: {}", filepath, e);
+                        match Self::flush_tmp_file(&filepath, &target_dir).await {
+                            Err(e) => {
+                                eprintln!("Failed to flush {}: {}", filepath, e);
+                            }
+                            Ok(record_count) => {
+                                flushed_file_count += 1;
+                                flushed_record_count = flushed_record_count + record_count;
+                            }
                         }
                     }
                 }
             }
+            eprintln!(
+                "Data type {}: flushed {} records across {} files",
+                &data_type, flushed_record_count, flushed_file_count
+            );
         }
     }
 
@@ -308,22 +323,22 @@ impl Archiver {
     }
 
     /// Atomically flushes a temporary file to the target hive-partitioned structure
-    async fn flush_tmp_file(filepath: &str, target_dir: &str) -> OrError<()> {
+    async fn flush_tmp_file(filepath: &str, target_dir: &str) -> OrError<usize> {
         let filepath_clone = filepath.to_string();
         let target_dir_clone = target_dir.to_string();
 
         // Use spawn_blocking for heavy I/O operations
-        tokio::task::spawn_blocking(move || {
+        let flushed_record_count = tokio::task::spawn_blocking(move || {
             Self::flush_tmp_file_blocking(&filepath_clone, &target_dir_clone)
         })
         .await
         .map_err(|e| format!("Task join error: {}", e))??;
 
-        Ok(())
+        Ok(flushed_record_count)
     }
 
     /// Blocking implementation of flush_tmp_file
-    fn flush_tmp_file_blocking(filepath: &str, target_dir: &str) -> OrError<()> {
+    fn flush_tmp_file_blocking(filepath: &str, target_dir: &str) -> OrError<usize> {
         // Parse the filepath
         let (data_type, symbol, datetime) = Self::parse_tmp_filepath(filepath)?;
 
@@ -347,30 +362,18 @@ impl Archiver {
         if !Path::new(&target_path).exists() {
             // Recompress with ZSTD for optimal storage
             let record_count = Self::recompress_parquet_file(filepath, &target_path)?;
-
             // Delete the source file
             fs::remove_file(filepath)
                 .map_err(|e| format!("Failed to remove source file {}: {}", filepath, e))?;
-
-            println!(
-                "Archived {} → {} ({} records)",
-                filepath, target_path, record_count
-            );
+            Ok(record_count)
         } else {
             // Complex case: merge with existing file
             let record_count = Self::merge_parquet_files(filepath, &target_path)?;
-
             // Delete the source file after successful merge
             fs::remove_file(filepath)
                 .map_err(|e| format!("Failed to remove source file {}: {}", filepath, e))?;
-
-            println!(
-                "Merged {} → {} ({} total records, ZSTD compressed)",
-                filepath, target_path, record_count
-            );
+            Ok(record_count)
         }
-
-        Ok(())
     }
 
     /// Recompresses a parquet file with ZSTD compression

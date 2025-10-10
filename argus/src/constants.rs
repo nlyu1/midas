@@ -14,3 +14,4 @@ pub const HYPERLIQUID_DATA_SUFFIX: &str = "hyperliquid";
 // Time between reclaiming
 pub const RELAY_BATCH_SIZE: usize = 10;
 pub const RELAY_BATCH_DELAY_MS: u64 = 100;
+pub const HYPERLIQUID_ARCHIVER_FLUSH_INTERVAL_SECONDS: u64 = 10; 

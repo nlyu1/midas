@@ -1,5 +1,5 @@
 use super::{BboUpdate, OrderbookSnapshot, PerpAssetContext, SpotAssetContext, TradeUpdate};
-use crate::scribe::{AgoraDirScribe, Archiver};
+use crate::{AgoraDirScribe, Archiver};
 use agora::utils::OrError;
 use agora::{AgorableOption, ConnectionHandle};
 use std::time::Duration;
@@ -277,7 +277,9 @@ impl HyperliquidArchiver {
         println!("  Spot: {} → {}", spot_tmp_dir, spot_output_dir);
         println!("  Perp: {} → {}", perp_tmp_dir, perp_output_dir);
         println!();
-        println!("Output format: {{output_dir}}/{{spot|perp}}/{{data_type}}/date={{date}}/symbol={{symbol}}/data.parquet");
+        println!(
+            "Output format: {{output_dir}}/{{spot|perp}}/{{data_type}}/date={{date}}/symbol={{symbol}}/data.parquet"
+        );
         println!();
         println!("Background tasks are scanning for files every 10 seconds.");
         println!("Files are archived when newer data is detected for the same symbol.");
