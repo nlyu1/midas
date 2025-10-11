@@ -450,6 +450,7 @@ impl UniverseManager {
     /// * `OrError<Vec<TradingSymbol>>` - List of normalized perpetual symbols (e.g., "BTC_PERP", "ETH_PERP")
     pub async fn perp_universe(&self) -> OrError<Vec<TradingSymbol>> {
         let perp_read = self.perp_universe.read().await;
+        // Ok(perp_read.clone()[0..120].to_vec())
         Ok(perp_read.clone())
     }
 

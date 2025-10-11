@@ -74,8 +74,6 @@ struct RawSpotAssetCtx {
     total_supply: Option<String>,
 }
 
-// Context, bbo, orderbook, last-trade
-
 #[derive(Deserialize)]
 struct RawSpotAssetContext {
     coin: String, // Used for symbol extraction and mapping
