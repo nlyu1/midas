@@ -361,7 +361,6 @@ impl<S: BinanceCsvSchema> BinanceDataInterface for BinanceTradeBook<S> {
             fs::create_dir_all(parent)?;
         }
         let url = self.build_download_url(symbol, date);
-        println!("URL: {}", &url);
         let client = reqwest::Client::new();
         let response = client.get(&url).send().await?;
 

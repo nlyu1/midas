@@ -6,6 +6,7 @@ use chrono::NaiveDate;
 pub use last_trades::{BinanceSpotTradeBook, BinanceUmFuturesTradeBook};
 use polars::prelude::*;
 use rayon::prelude::*;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -193,7 +194,6 @@ pub trait BinanceDataInterface: Send + Sync + Sized {
             }
         })
         .await??;
-
         Ok(result)
     }
 

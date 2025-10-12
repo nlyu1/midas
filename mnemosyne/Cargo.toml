@@ -16,6 +16,10 @@ path = "bin/binance-spot-trades.rs"
 name = "binance-futures-trades"
 path = "bin/binance-futures-trades.rs"
 
+[[bin]]
+name = "dev.rs"
+path = "bin/dev.rs"
+
 [dependencies]
 anyhow = "1.0.100"
 arrow = "56.2.0"
