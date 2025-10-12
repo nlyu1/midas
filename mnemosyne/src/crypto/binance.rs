@@ -1,0 +1,370 @@
+pub mod last_trades;
+pub mod s3_helpers;
+
+use anyhow::{Context, Result};
+use chrono::NaiveDate;
+pub use last_trades::{BinanceSpotTradeBook, BinanceUmFuturesTradeBook};
+use polars::prelude::*;
+use rayon::prelude::*;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+// Binance S3 constants
+pub const BINANCE_S3_BASE_URL: &str = "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision";
+
+/// Cutoff timestamp in milliseconds for timestamp format change (2025-01-01)
+/// Pre-2025: timestamps in milliseconds, Post-2025: timestamps in microseconds
+pub fn binance_timestamp_cutoff_ms() -> i64 {
+    use chrono::{NaiveDate, NaiveTime};
+    NaiveDate::from_ymd_opt(2025, 1, 1)
+        .unwrap()
+        .and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap())
+        .and_utc()
+        .timestamp_millis()
+}
+
+/// Trait for defining CSV schema for different Binance data types
+pub trait BinanceCsvSchema: Send + Sync + 'static {
+    /// Get the CSV schema for this data type
+    fn get_schema() -> Schema;
+
+    /// Whether the CSV has a header row
+    fn has_header() -> bool;
+}
+
+#[derive(Debug, Default)]
+pub struct UpdateStats {
+    pub total: usize,
+    pub success: usize,
+    pub skipped: usize,
+    pub failed: usize,
+}
+
+/// Trait for Binance data interfaces (spot, futures, etc.)
+///
+/// Separates implementation-specific concerns (URLs, paths, processing, downloading) from
+/// common functionality (caching, diff calculation, parallel updates).
+///
+/// Universe DataFrame must have columns:
+/// - "symbol": DataType::String
+/// - "date": DataType::Date
+#[allow(async_fn_in_trait)]
+pub trait BinanceDataInterface: Send + Sync + Sized {
+    // ============================================
+    // REQUIRED: Implementation-specific methods
+    // ============================================
+
+    /// Build download URL for a specific symbol and date
+    fn build_download_url(&self, symbol: &str, date: NaiveDate) -> String;
+
+    /// Build hive-style path for processed parquet file
+    fn build_hive_path(&self, symbol: &str, date: NaiveDate) -> PathBuf;
+
+    /// Build raw path for downloaded zip file
+    fn build_raw_path(&self, symbol: &str, date: NaiveDate) -> PathBuf;
+
+    /// Get hive data directory path
+    fn hive_data_path(&self) -> &Path;
+
+    /// Get raw data directory path
+    fn raw_data_path(&self) -> &Path;
+
+    /// Get universe cache file path
+    fn universe_cache_path(&self) -> &Path;
+
+    /// Get date filters (earliest, latest)
+    fn date_filters(&self) -> (Option<NaiveDate>, Option<NaiveDate>);
+
+    /// Fetch fresh universe from S3 (implementation-specific S3 logic)
+    /// Must return DataFrame with "symbol" (String) and "date" (Date) columns
+    async fn fetch_new_universe(&self) -> Result<DataFrame>;
+
+    /// Download raw data file (implementation-specific download logic for flexibility)
+    async fn download_raw(&self, symbol: &str, date: NaiveDate) -> Result<()>;
+
+    /// Process downloaded zip to parquet (calls implementation-specific helpers)
+    /// Returns number of rows processed
+    fn process_download_to_parquet(
+        zip_path: &Path,
+        hive_path: &Path,
+        symbol: &str,
+        date: NaiveDate,
+    ) -> Result<usize>;
+
+    // ============================================
+    // PROVIDED: Common functionality
+    // ============================================
+
+    /// Initialize universe with caching and date filtering
+    async fn initialize_universe(&self, refresh: bool) -> Result<()> {
+        let universe_cache_path = self.universe_cache_path();
+
+        // Fetch new universe if refresh requested or cache missing
+        if refresh || !universe_cache_path.exists() {
+            let mut universe_df = self.fetch_new_universe().await?;
+
+            // Create parent directory if needed
+            if let Some(parent) = universe_cache_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+
+            // Write to cache
+            let mut file = fs::File::create(universe_cache_path)?;
+            ParquetWriter::new(&mut file).finish(&mut universe_df)?;
+            println!("Written new universe to {:?}", universe_cache_path)
+        }
+
+        Ok(())
+    }
+
+    /// Get the universe dataframe (reads from cache, applies date filters)
+    async fn get_universe_df(&self) -> Result<DataFrame> {
+        let universe_cache_path = self.universe_cache_path();
+
+        if !universe_cache_path.exists() {
+            anyhow::bail!("Universe not initialized. Call initialize_universe first.");
+        }
+
+        let path_str = universe_cache_path
+            .to_str()
+            .context("Invalid universe cache path")?
+            .to_string();
+
+        let (earliest_date, latest_date) = self.date_filters();
+
+        // Wrap .collect() in spawn_blocking to avoid nested runtime issues
+        let universe_df = tokio::task::spawn_blocking(move || {
+            let mut universe_df =
+                LazyFrame::scan_parquet(PlPath::new(&path_str), Default::default())?.collect()?;
+
+            // Apply date filters if specified
+            if earliest_date.is_some() || latest_date.is_some() {
+                let mut lazy_df = universe_df.lazy();
+                if let Some(earliest) = earliest_date {
+                    lazy_df = lazy_df.filter(col("date").gt_eq(lit(earliest)));
+                }
+                if let Some(latest) = latest_date {
+                    lazy_df = lazy_df.filter(col("date").lt_eq(lit(latest)));
+                }
+                universe_df = lazy_df.collect()?;
+            }
+
+            Ok::<DataFrame, anyhow::Error>(universe_df)
+        })
+        .await??;
+
+        Ok(universe_df)
+    }
+
+    /// Calculate missing (symbol, date) pairs (universe - on_disk)
+    async fn nohive_symbol_date_pairs(&self) -> Result<DataFrame> {
+        let universe_df = self.get_universe_df().await?;
+        let universe_lf = universe_df.lazy().select(&[col("symbol"), col("date")]);
+
+        let hive_pattern = self.hive_data_path().join("**/data.parquet");
+        let hive_pattern_str = hive_pattern
+            .to_str()
+            .context("Invalid hive path pattern")?
+            .to_string();
+
+        // Wrap .collect() in spawn_blocking to avoid nested runtime issues
+        let result = tokio::task::spawn_blocking(move || {
+            match LazyFrame::scan_parquet(PlPath::new(&hive_pattern_str), Default::default()) {
+                Ok(onhive_lf) => {
+                    let onhive_keys = onhive_lf
+                        .select(&[col("symbol"), col("date")])
+                        .unique(None, UniqueKeepStrategy::First);
+
+                    let missing_pairs_lf = universe_lf.join(
+                        onhive_keys,
+                        [col("symbol"), col("date")],
+                        [col("symbol"), col("date")],
+                        JoinArgs::new(JoinType::Anti),
+                    );
+
+                    missing_pairs_lf
+                        .collect()
+                        .context("Failed to execute anti-join query")
+                }
+                Err(_) => universe_lf
+                    .collect()
+                    .context("Failed to collect universe (no files on disk yet)"),
+            }
+        })
+        .await??;
+
+        Ok(result)
+    }
+
+    /// Ensure data is ready (idempotent side effect: download + process if needed)
+    ///
+    /// This is the core shared logic used by both symbol_date_df and update_universe.
+    async fn ensure_data_ready(self: Arc<Self>, symbol: &str, date: NaiveDate) -> Result<()> {
+        let hive_path = self.build_hive_path(symbol, date);
+
+        // Already processed
+        if hive_path.exists() {
+            return Ok(());
+        }
+
+        // Download if needed
+        self.download_raw(symbol, date).await?;
+
+        // Process zip to parquet (CPU-bound, use blocking task)
+        let raw_path = self.build_raw_path(symbol, date);
+        let symbol_owned = symbol.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            Self::process_download_to_parquet(&raw_path, &hive_path, &symbol_owned, date)
+        })
+        .await??;
+
+        Ok(())
+    }
+
+    /// Get data for a specific symbol and date
+    async fn symbol_date_df(self: Arc<Self>, symbol: &str, date: NaiveDate) -> Result<LazyFrame> {
+        let universe_df = self.get_universe_df().await?;
+
+        let symbol_owned = symbol.to_string();
+        // Check if this symbol/date exists in universe (wrap .collect() in spawn_blocking)
+        let exists = tokio::task::spawn_blocking(move || {
+            universe_df
+                .clone()
+                .lazy()
+                .filter(
+                    col("date")
+                        .eq(lit(date))
+                        .and(col("symbol").eq(lit(symbol_owned))),
+                )
+                .collect()
+                .map(|df| df.height() > 0)
+        })
+        .await??;
+
+        if !exists {
+            anyhow::bail!("Unable to fetch {} on {}", symbol, date);
+        }
+
+        // Build paths before ensure_data_ready (which takes ownership)
+        let hive_path = self.build_hive_path(symbol, date);
+
+        // Ensure data is ready (download + process if needed)
+        self.ensure_data_ready(symbol, date).await?;
+
+        // Read and return
+        let path_str = hive_path.to_str().context("Invalid hive path")?;
+        Ok(LazyFrame::scan_parquet(
+            PlPath::new(path_str),
+            Default::default(),
+        )?)
+    }
+
+    /// Download and process all missing (symbol, date) pairs using parallel processing
+    ///
+    /// Uses rayon for thread-level parallelism with per-thread tokio runtimes.
+    /// Each thread calls ensure_data_ready to perform async I/O for downloads
+    /// and blocking I/O for processing.
+    async fn update_universe(self: Arc<Self>, num_workers: usize) -> Result<UpdateStats> {
+        let missing = self.nohive_symbol_date_pairs().await?;
+
+        // Extract (symbol, date) pairs from DataFrame with Date dtype
+        let symbol_col = missing.column("symbol")?.str()?;
+        let date_col = missing.column("date")?.date()?;
+
+        let mut pairs: Vec<(String, NaiveDate)> = Vec::new();
+        for i in 0..missing.height() {
+            if let (Some(symbol), Some(days_since_epoch)) =
+                (symbol_col.get(i), date_col.phys.get(i))
+            {
+                // Polars Date is stored as days since Unix epoch (1970-01-01)
+                // Convert to NaiveDate
+                if let Some(date) = NaiveDate::from_num_days_from_ce_opt(days_since_epoch + 719163)
+                {
+                    pairs.push((symbol.to_string(), date));
+                }
+            }
+        }
+
+        if pairs.is_empty() {
+            println!("No missing pairs to download");
+            return Ok(UpdateStats::default());
+        }
+
+        println!("Found {} missing (symbol, date) pairs", pairs.len());
+        println!("Starting download with {} workers...", num_workers);
+
+        // Process pairs in parallel using rayon + per-thread tokio runtimes
+        let results: Vec<(String, NaiveDate, String, Option<String>)> = pairs
+            .into_par_iter()
+            .map(|(symbol, date)| {
+                let self_clone = Arc::clone(&self);
+                let rt = tokio::runtime::Runtime::new().unwrap();
+
+                rt.block_on(async move {
+                    let hive_path = self_clone.build_hive_path(&symbol, date);
+
+                    // Skip if already exists
+                    if hive_path.exists() {
+                        return (symbol, date, "skipped".to_string(), None);
+                    }
+
+                    println!("  {} {}: Processing...", symbol, date);
+
+                    // Use shared ensure_data_ready logic
+                    match self_clone.ensure_data_ready(&symbol, date).await {
+                        Ok(_) => {
+                            println!("  {} {}: Done!", symbol, date);
+                            (symbol, date, "success".to_string(), None)
+                        }
+                        Err(e) => {
+                            eprintln!("  {} {}: Failed - {}", symbol, date, e);
+                            (symbol, date, "error".to_string(), Some(e.to_string()))
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        // Compute summary statistics
+        let stats = UpdateStats {
+            total: results.len(),
+            success: results
+                .iter()
+                .filter(|(_, _, status, _)| status == "success")
+                .count(),
+            skipped: results
+                .iter()
+                .filter(|(_, _, status, _)| status == "skipped")
+                .count(),
+            failed: results
+                .iter()
+                .filter(|(_, _, status, _)| !matches!(status.as_str(), "success" | "skipped"))
+                .count(),
+        };
+
+        // Print errors if any
+        let errors: Vec<_> = results
+            .iter()
+            .filter(|(_, _, status, _)| !matches!(status.as_str(), "success" | "skipped"))
+            .collect();
+
+        if !errors.is_empty() {
+            println!("\n⚠ {} failures:", errors.len());
+            for (symbol, date, status, error) in errors.iter().take(10) {
+                println!("  {} {}: {} - {:?}", symbol, date, status, error);
+            }
+            if errors.len() > 10 {
+                println!("  ... and {} more", errors.len() - 10);
+            }
+        }
+
+        println!(
+            "✓ Completed: {} successful, {} skipped, {} failed",
+            stats.success, stats.skipped, stats.failed
+        );
+
+        Ok(stats)
+    }
+}

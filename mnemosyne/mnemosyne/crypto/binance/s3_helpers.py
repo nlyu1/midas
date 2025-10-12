@@ -1,28 +1,11 @@
 import re
-import urllib.request
 import xml.etree.ElementTree as ET
-
-"""
-binance_universe.py
-
-This helper module provides functions for listing and parsing S3 bucket pages and defines a 
-BinanceUniverse class for building a universe of Binance trade tickers with contiguous date ranges.
-
-Helper functions:
-    - s3_list_pages(base_url, prefix, delimiter="/")
-    - get_all_keys(base_url, prefix)
-    - get_all_trade_pairs(base_url, prefix)
-
-BinanceUniverse class:
-    - __init__(base_url, cache_path, refresh_cache): builds or reads a cache (CSV) of symbols with contiguous date ranges.
-    - symbols(min_dates=0): returns a list of ticker symbols that have at least min_dates days of data.
-    - symbol_dates(symbol): returns (start_date, end_date) for the given symbol.
-"""
+import httpx
 
 
-def s3_list_pages(base_url, prefix, delimiter="/"):
+async def s3_list_pages(base_url, prefix, delimiter="/"):
     """
-    Generator that yields parsed XML pages from an S3 bucket listing,
+    Async generator that yields parsed XML pages from an S3 bucket listing,
     handling pagination using the marker.
 
     Args:
@@ -44,43 +27,48 @@ def s3_list_pages(base_url, prefix, delimiter="/"):
 
     url = f"{base_url}?prefix={prefix}&delimiter={delimiter}"
     marker = None
+    print("Fetching s3 list pages from:", url)
 
-    while True:
-        paged_url = url + (f"&marker={marker}" if marker else "")
-        response = urllib.request.urlopen(paged_url)
-        xml_content = response.read().decode("utf-8")
-        root = ET.fromstring(xml_content)
+    async with httpx.AsyncClient() as client:
+        while True:
+            paged_url = url + (f"&marker={marker}" if marker else "")
+            response = await client.get(paged_url)
+            xml_content = response.text
+            root = ET.fromstring(xml_content)
 
-        # Detect namespace if present
-        ns = {}
-        m = re.match(r"\{(.*)\}", root.tag)
-        if m:
-            ns["s3"] = m.group(1)
+            # Detect namespace if present
+            ns = {}
+            m = re.match(r"\{(.*)\}", root.tag)
+            if m:
+                ns["s3"] = m.group(1)
 
-        yield root, ns, prefix
+            yield root, ns, prefix
 
-        # Check pagination: use <IsTruncated> and <NextMarker>
-        if ns:
-            is_truncated_elem = root.find(".//s3:IsTruncated", ns)
-            next_marker_elem = root.find(".//s3:NextMarker", ns)
-        else:
-            is_truncated_elem = root.find(".//IsTruncated")
-            next_marker_elem = root.find(".//NextMarker")
-
-        if is_truncated_elem is not None and is_truncated_elem.text.lower() == "true":
-            if next_marker_elem is not None and next_marker_elem.text:
-                marker = next_marker_elem.text
+            # Check pagination: use <IsTruncated> and <NextMarker>
+            if ns:
+                is_truncated_elem = root.find(".//s3:IsTruncated", ns)
+                next_marker_elem = root.find(".//s3:NextMarker", ns)
             else:
-                break  # No marker provided, exit loop
-        else:
-            break  # No more pages
+                is_truncated_elem = root.find(".//IsTruncated")
+                next_marker_elem = root.find(".//NextMarker")
+
+            if (
+                is_truncated_elem is not None
+                and is_truncated_elem.text.lower() == "true"
+            ):
+                if next_marker_elem is not None and next_marker_elem.text:
+                    marker = next_marker_elem.text
+                else:
+                    break  # No marker provided, exit loop
+            else:
+                break  # No more pages
 
 
-def get_all_keys(
+async def get_all_keys(
     base_url="https://s3-ap-northeast-1.amazonaws.com/data.binance.vision", prefix=""
 ):
     """
-    Retrieve all object keys from an S3 bucket listing by handling pagination.
+    Retrieve all object keys from an S3 bucket listing by handling pagination (async).
 
     Args:
         base_url (str): S3 endpoint.
@@ -90,7 +78,7 @@ def get_all_keys(
         list[str]: List of all object keys.
     """
     all_keys = []
-    for root, ns, _ in s3_list_pages(base_url, prefix, delimiter="/"):
+    async for root, ns, _ in s3_list_pages(base_url, prefix, delimiter="/"):
         if ns:
             keys = [elem.text for elem in root.findall(".//s3:Key", ns)]
         else:
@@ -99,12 +87,12 @@ def get_all_keys(
     return all_keys
 
 
-def get_all_trade_pairs(
+async def get_all_trade_pairs(
     base_url="https://s3-ap-northeast-1.amazonaws.com/data.binance.vision",
     prefix="spot/daily/trades",
 ):
     """
-    Retrieve all trade pairs from an S3 bucket listing. It assumes that trade pairs are represented
+    Retrieve all trade pairs from an S3 bucket listing (async). It assumes that trade pairs are represented
     as directory prefixes under the given prefix.
 
     Args:
@@ -115,7 +103,7 @@ def get_all_trade_pairs(
         list[str]: List of trade pair names (e.g., "BTCUSDT", "EOSUSDT").
     """
     trade_pairs = set()
-    for root, ns, fixed_prefix in s3_list_pages(base_url, prefix, delimiter="/"):
+    async for root, ns, fixed_prefix in s3_list_pages(base_url, prefix, delimiter="/"):
         if ns:
             common_prefixes = root.findall(".//s3:CommonPrefixes", ns)
         else:
@@ -130,3 +118,25 @@ def get_all_trade_pairs(
                 if trade_pair:
                     trade_pairs.add(trade_pair.split("/")[-1])
     return list(trade_pairs)
+
+
+# ----------------------
+# Helper functions for symbol file retrieval
+# (These use the helper functions above.)
+# ----------------------
+async def get_binance_usdt_symbols(
+    base_url="https://s3-ap-northeast-1.amazonaws.com/data.binance.vision",
+    prefix="spot/daily/trades",
+):
+    """
+    Returns a list of universe symbols (tickers) by processing the S3 trade pairs (async).
+    (Strips 'USDT' from trade pairs.)
+    """
+    trade_pairs = await get_all_trade_pairs(base_url, prefix)
+    # Filter for trade pairs that end with 'USDT' and remove 'USDT'
+    return list(
+        map(
+            lambda x: x.replace("USDT", ""),
+            filter(lambda x: x.endswith("USDT"), trade_pairs),
+        )
+    )
