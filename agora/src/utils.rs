@@ -1,5 +1,5 @@
 mod common;
-pub use common::{ConnectionHandle, OrError, prepare_socket_path, strip_and_verify};
+pub use common::{ConnectionHandle, OrError, RpcError, agora_error_msg, prepare_socket_path, strip_and_verify};
 
 mod pathtree;
 pub use pathtree::{TreeNode, TreeNodeRef, TreeTrait};

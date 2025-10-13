@@ -3,7 +3,7 @@
 
 use super::publisher_info::PublisherInfo;
 use crate::ConnectionHandle;
-use crate::utils::OrError;
+use crate::utils::RpcError;
 
 #[tarpc::service]
 pub trait AgoraMeta {
@@ -12,13 +12,13 @@ pub trait AgoraMeta {
         name: String,
         path: String,
         host_connection: ConnectionHandle,
-    ) -> OrError<PublisherInfo>;
+    ) -> RpcError<PublisherInfo>;
     /// Confirms a registered publisher by pinging it.
-    async fn confirm_publisher(path: String) -> OrError<()>;
+    async fn confirm_publisher(path: String) -> RpcError<()>;
     /// Removes a publisher from the specified path.
-    async fn remove_publisher(path: String) -> OrError<PublisherInfo>;
+    async fn remove_publisher(path: String) -> RpcError<PublisherInfo>;
     /// Returns the path tree as a string representation.
     async fn path_tree() -> String;
     /// Retrieves publisher information for the specified path.
-    async fn publisher_info(path: String) -> OrError<PublisherInfo>;
+    async fn publisher_info(path: String) -> RpcError<PublisherInfo>;
 }

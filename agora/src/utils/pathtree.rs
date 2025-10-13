@@ -3,6 +3,7 @@
 
 use crate::utils::OrError;
 use crate::agora_error;
+use anyhow::{anyhow, bail};
 use std::fmt;
 use std::sync::{Arc, Weak, Mutex};
 
@@ -98,10 +99,10 @@ impl TreeTrait for TreeNode {
     fn remove_child_and_branch(self: &TreeNodeRef, path: &str) -> OrError<()> {
         let child = self.get_child(path)?;
         if child.is_root() {
-            return Err(agora_error!("utils::TreeNode", "remove_child_and_branch", "cannot remove root node"));
+            bail!(agora_error!("utils::TreeNode", "remove_child_and_branch", "cannot remove root node"));
         }
         if !child.is_leaf() {
-            return Err(agora_error!("utils::TreeNode", "remove_child_and_branch", "cannot remove non-leaf node"));
+            bail!(agora_error!("utils::TreeNode", "remove_child_and_branch", "cannot remove non-leaf node"));
         }
         // Find branching point: walk up until node with >1 children
         let (branching_ancestor, branch_name) = child.branching_ancestor()?;
@@ -112,7 +113,7 @@ impl TreeTrait for TreeNode {
     fn parent(&self) -> OrError<TreeNodeRef> {
         match self.parent.lock().unwrap().as_ref() {
             Some(parent) => Ok(parent.upgrade().unwrap()),
-            None => Err(agora_error!("utils::TreeNode", "parent", &format!("parent not found for '{}'", self.name))),
+            None => bail!(agora_error!("utils::TreeNode", "parent", &format!("parent not found for '{}'", self.name))),
         }
     }
 
@@ -204,8 +205,8 @@ impl TreeNode {
             .find(|child| child.name == name)
             .cloned()
             .ok_or_else(|| {
-                agora_error!("utils::TreeNode", "get_immediate_child",
-                    &format!("child '{}' not found under '{}'", name, self.name))
+                anyhow!(agora_error!("utils::TreeNode", "get_immediate_child",
+                    &format!("child '{}' not found under '{}'", name, self.name)))
             })
     }
 
@@ -216,8 +217,8 @@ impl TreeNode {
         children.retain(|child| child.name != name);
 
         if children.len() == initial_len {
-            Err(agora_error!("utils::TreeNode", "remove_immediate_child",
-                &format!("child '{}' not found under '{}'", name, self.name)))
+            bail!(agora_error!("utils::TreeNode", "remove_immediate_child",
+                &format!("child '{}' not found under '{}'", name, self.name)));
         } else {
             Ok(())
         }
@@ -268,7 +269,7 @@ impl TreeNode {
 
         // Branch 2: Parent node - {"name":[children...]}
         if !repr.starts_with('{') || !repr.ends_with('}') {
-            return Err(agora_error!("utils::TreeNode", "from_repr",
+            bail!(agora_error!("utils::TreeNode", "from_repr",
                 &format!("invalid format: expected {{...}} or \"...\", got: {}", repr)));
         }
 
@@ -278,14 +279,14 @@ impl TreeNode {
         if let Some(colon_pos) = inner.find(':') {
             let name_part = inner[..colon_pos].trim();
             if !name_part.starts_with('"') || !name_part.ends_with('"') {
-                return Err(agora_error!("utils::TreeNode", "from_repr",
+                bail!(agora_error!("utils::TreeNode", "from_repr",
                     &format!("invalid name format: {}", name_part)));
             }
             let name = &name_part[1..name_part.len() - 1];
 
             let children_part = inner[colon_pos + 1..].trim();
             if !children_part.starts_with('[') || !children_part.ends_with(']') {
-                return Err(agora_error!("utils::TreeNode", "from_repr",
+                bail!(agora_error!("utils::TreeNode", "from_repr",
                     &format!("invalid children format: {}", children_part)));
             }
 
@@ -303,8 +304,8 @@ impl TreeNode {
 
             Ok(node)
         } else {
-            Err(agora_error!("utils::TreeNode", "from_repr",
-                &format!("invalid format: no colon found in {}", inner)))
+            bail!(agora_error!("utils::TreeNode", "from_repr",
+                &format!("invalid format: no colon found in {}", inner)));
         }
     }
 

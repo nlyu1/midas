@@ -1,7 +1,7 @@
-//! Shared utilities for Agora: `ConnectionHandle` for network addressing, error macros (`agora_error!`, `agora_error_cause!`),
+//! Shared utilities for Agora: `ConnectionHandle` for network addressing, error helpers (`agora_error!`, `agora_error_cause!`),
 //! path validation (`strip_and_verify`), and socket setup (`prepare_socket_path`). Used across all modules.
 
-use crate::{agora_error, agora_error_cause};
+use anyhow::{bail, Context};
 use local_ip_address::local_ip;
 use std::fmt::{Display, Formatter};
 use std::net::IpAddr;
@@ -15,29 +15,32 @@ pub struct ConnectionHandle {
     port: u16,
 }
 
-pub type OrError<T> = Result<T, String>;
+pub type OrError<T> = anyhow::Result<T>;
 
-/// Creates standardized Agora error message
+/// RPC-compatible error type (serializable for TARPC)
+pub type RpcError<T> = Result<T, String>;
+
+/// Creates standardized Agora error message format
+#[inline]
+pub fn agora_error_msg(component: &str, method: &str, msg: &str) -> String {
+    format!("Agora {}::{} Error: {}", component, method, msg)
+}
+
+/// Creates standardized Agora error message with formatted arguments
 #[macro_export]
 macro_rules! agora_error {
     ($component:expr, $method:expr, $msg:expr) => {
-        format!(
-            "Agora {} Error: {}",
-            concat!($component, "::", $method),
-            $msg
-        )
+        $crate::utils::agora_error_msg($component, $method, $msg)
     };
 }
 
-/// Creates error with cause chain
+/// Creates error with cause chain (for use with .context())
 #[macro_export]
 macro_rules! agora_error_cause {
     ($component:expr, $method:expr, $msg:expr, $cause:expr) => {
         format!(
-            "Agora {} Error: {}. Caused by -> {}",
-            concat!($component, "::", $method),
-            $msg,
-            $cause
+            "Agora {}::{} Error: {}. Caused by -> {}",
+            $component, $method, $msg, $cause
         )
     };
 }
@@ -56,14 +59,11 @@ impl ConnectionHandle {
     }
 
     pub fn new_local(port: u16) -> OrError<Self> {
-        let addr = local_ip().map_err(|e| {
-            agora_error_cause!(
-                "utils::ConnectionHandle",
-                "new_local",
-                "failed to get local IP",
-                e
-            )
-        })?;
+        let addr = local_ip().context(agora_error!(
+            "utils::ConnectionHandle",
+            "new_local",
+            "failed to get local IP"
+        ))?;
         Ok(Self { addr, port })
     }
 
@@ -91,7 +91,7 @@ impl Display for ConnectionHandle {
 /// - No directory traversal (..)
 pub fn strip_and_verify(path_string: &str) -> OrError<String> {
     if path_string.is_empty() {
-        return Err(agora_error!(
+        bail!(agora_error!(
             "utils",
             "strip_and_verify",
             "path cannot be empty"
@@ -99,21 +99,21 @@ pub fn strip_and_verify(path_string: &str) -> OrError<String> {
     }
     let stripped = path_string.trim_matches('/');
     if stripped.is_empty() {
-        return Err(agora_error!(
+        bail!(agora_error!(
             "utils",
             "strip_and_verify",
             "path cannot be empty after stripping slashes"
         ));
     }
     if stripped.contains("//") {
-        return Err(agora_error!(
+        bail!(agora_error!(
             "utils",
             "strip_and_verify",
             "path cannot contain double slashes"
         ));
     }
     if stripped.contains("..") {
-        return Err(agora_error!(
+        bail!(agora_error!(
             "utils",
             "strip_and_verify",
             "path cannot contain '..' (directory traversal)"
@@ -121,7 +121,7 @@ pub fn strip_and_verify(path_string: &str) -> OrError<String> {
     }
     for c in stripped.chars() {
         if !c.is_alphanumeric() && c != '-' && c != '_' && c != '/' {
-            return Err(agora_error!(
+            bail!(agora_error!(
                 "utils",
                 "strip_and_verify",
                 &format!("path contains invalid character: '{}'", c)
@@ -135,24 +135,18 @@ pub fn strip_and_verify(path_string: &str) -> OrError<String> {
 pub fn prepare_socket_path(socket_path: &str) -> OrError<()> {
     let path = std::path::Path::new(socket_path);
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            agora_error_cause!(
-                "utils",
-                "prepare_socket_path",
-                "failed to create parent directory",
-                e
-            )
-        })?;
+        std::fs::create_dir_all(parent).context(agora_error!(
+            "utils",
+            "prepare_socket_path",
+            "failed to create parent directory"
+        ))?;
     }
     if path.exists() {
-        std::fs::remove_file(path).map_err(|e| {
-            agora_error_cause!(
-                "utils",
-                "prepare_socket_path",
-                "failed to remove existing socket file",
-                e
-            )
-        })?;
+        std::fs::remove_file(path).context(agora_error!(
+            "utils",
+            "prepare_socket_path",
+            "failed to remove existing socket file"
+        ))?;
     }
     Ok(())
 }

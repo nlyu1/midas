@@ -102,7 +102,7 @@ pub struct UpdateStats {
 /// - "symbol": DataType::String
 /// - "date": DataType::Date
 #[allow(async_fn_in_trait)]
-pub trait BinanceDataInterface: Send + Sync + Sized {
+pub trait BinanceDataInterface: Send + Sync + Sized + 'static {
     // ============================================
     // REQUIRED: Implementation-specific methods
     // ============================================
@@ -300,7 +300,8 @@ pub trait BinanceDataInterface: Send + Sync + Sized {
                     }
                 }
             }
-            (set, Some(cached.clone().lazy()))
+            // Normalize schema: only select symbol and date columns to match new data
+            (set, Some(cached.clone().lazy().select([col("symbol"), col("date")])))
         } else {
             (HashSet::new(), None)
         };
@@ -515,36 +516,41 @@ pub trait BinanceDataInterface: Send + Sync + Sized {
 
         println!("Found {} missing (symbol, date) pairs", pairs.len());
 
-        // Process pairs in parallel using rayon + per-thread tokio runtimes
-        let results: Vec<(String, NaiveDate, String, Option<String>)> = pairs
-            .into_par_iter()
-            .map(|(symbol, date)| {
-                let self_clone = Arc::clone(&self);
-                let rt = tokio::runtime::Runtime::new().unwrap();
+        // Wrap parallel processing in spawn_blocking to avoid nested runtime issues
+        let self_clone = Arc::clone(&self);
+        let results: Vec<(String, NaiveDate, String, Option<String>)> = tokio::task::spawn_blocking(move || {
+            // Process pairs in parallel using rayon + per-thread tokio runtimes
+            pairs
+                .into_par_iter()
+                .map(|(symbol, date)| {
+                    let self_clone = Arc::clone(&self_clone);
+                    let rt = tokio::runtime::Runtime::new().unwrap();
 
-                rt.block_on(async move {
-                    let hive_path = self_clone.build_hive_path(&symbol, date);
+                    rt.block_on(async move {
+                        let hive_path = self_clone.build_hive_path(&symbol, date);
 
-                    // Skip if already exists
-                    if hive_path.exists() {
-                        return (symbol, date, "skipped".to_string(), None);
-                    }
-                    println!("  {} {}: Processing...", symbol, date);
-
-                    // Pure side effect: ensure parquet exists, or find data on disk.
-                    match self_clone.ensure_data_ready(&symbol, date).await {
-                        Ok(_) => {
-                            println!("  {} {}: Done!", symbol, date);
-                            (symbol, date, "success".to_string(), None)
+                        // Skip if already exists
+                        if hive_path.exists() {
+                            return (symbol, date, "skipped".to_string(), None);
                         }
-                        Err(e) => {
-                            eprintln!("  {} {}: Failed - {}", symbol, date, e);
-                            (symbol, date, "error".to_string(), Some(e.to_string()))
+                        println!("  {} {}: Processing...", symbol, date);
+
+                        // Pure side effect: ensure parquet exists, or find data on disk.
+                        match self_clone.ensure_data_ready(&symbol, date).await {
+                            Ok(_) => {
+                                println!("  {} {}: Done!", symbol, date);
+                                (symbol, date, "success".to_string(), None)
+                            }
+                            Err(e) => {
+                                eprintln!("  {} {}: Failed - {}", symbol, date, e);
+                                (symbol, date, "error".to_string(), Some(e.to_string()))
+                            }
                         }
-                    }
+                    })
                 })
-            })
-            .collect();
+                .collect()
+        })
+        .await?;
 
         // Compute summary statistics
         let stats = UpdateStats {

@@ -3,11 +3,12 @@
 
 use super::Agorable;
 use crate::ConnectionHandle;
-use crate::agora_error_cause;
+use crate::agora_error;
 use crate::metaserver::AgoraClient;
 use crate::ping::PingClient;
 use crate::rawstream::RawStreamClient;
 use crate::utils::{OrError, strip_and_verify};
+use anyhow::Context;
 use futures_util::StreamExt;
 use futures_util::stream::Stream;
 use std::marker::PhantomData;
@@ -33,9 +34,9 @@ impl<T: Agorable> Subscriber<T> {
         metaserver_connection: ConnectionHandle,
     ) -> OrError<Subscriber<T>> {
         // Step 1: Connect to metaserver
-        let metaclient = AgoraClient::new(metaserver_connection).await.map_err(|e| {
-            agora_error_cause!("core::Subscriber", "new", "failed to create AgoraClient", e)
-        })?;
+        let metaclient = AgoraClient::new(metaserver_connection)
+            .await
+            .context(agora_error!("core::Subscriber", "new", "failed to create AgoraClient"))?;
 
         let normalized_path = strip_and_verify(&path)?;
 
@@ -47,23 +48,18 @@ impl<T: Agorable> Subscriber<T> {
         let bytes_path_str = format!("{}/bytes", normalized_path);
 
         let rawstreamclient: RawStreamClient<Vec<u8>> =
-            RawStreamClient::new(host_gateway_connection, &bytes_path_str, None, None).map_err(
-                |e| {
-                    agora_error_cause!(
-                        "core::Subscriber",
-                        "new",
-                        "failed to create byte rawstream client",
-                        e
-                    )
-                },
+            RawStreamClient::new(host_gateway_connection, &bytes_path_str, None, None).context(
+                agora_error!(
+                    "core::Subscriber",
+                    "new",
+                    "failed to create byte rawstream client"
+                )
             )?;
 
         // Step 4: Create ping client for synchronous queries
         let pingclient = PingClient::new(&normalized_path, host_gateway_connection)
             .await
-            .map_err(|e| {
-                agora_error_cause!("core::Subscriber", "new", "failed to create ping client", e)
-            })?;
+            .context(agora_error!("core::Subscriber", "new", "failed to create ping client"))?;
 
         Ok(Self {
             rawstreamclient,
@@ -76,14 +72,11 @@ impl<T: Agorable> Subscriber<T> {
     /// Error: Ping fails or deserialization fails → propagates to caller.
     pub async fn get(&mut self) -> OrError<T> {
         let (current_bytes, _, _td) = self.pingclient.ping().await?;
-        let current_value: T = postcard::from_bytes(&current_bytes).map_err(|e| {
-            agora_error_cause!(
-                "core::Subscriber",
-                "get",
-                "failed to deserialize current value",
-                e
-            )
-        })?;
+        let current_value: T = postcard::from_bytes(&current_bytes).context(agora_error!(
+            "core::Subscriber",
+            "get",
+            "failed to deserialize current value"
+        ))?;
         Ok(current_value)
     }
 
@@ -95,31 +88,24 @@ impl<T: Agorable> Subscriber<T> {
     ) -> OrError<(T, Pin<Box<dyn Stream<Item = OrError<T>> + Send>>)> {
         // Get initial value via ping
         let (current_bytes, _, _td) = self.pingclient.ping().await?;
-        let current_value: T = postcard::from_bytes(&current_bytes).map_err(|e| {
-            agora_error_cause!(
-                "core::Subscriber",
-                "get_stream",
-                "failed to deserialize current value. If Omnisubscriber is succeeding, then double-check if published data type aligns with subscriber type",
-                e
-            )
-        })?;
+        let current_value: T = postcard::from_bytes(&current_bytes).context(agora_error!(
+            "core::Subscriber",
+            "get_stream",
+            "failed to deserialize current value. If Omnisubscriber is succeeding, then double-check if published data type aligns with subscriber type"
+        ))?;
 
         // Create stream that deserializes binary messages to T
         let raw_stream = self.rawstreamclient.subscribe();
         let typed_stream = raw_stream.map(|result| match result {
-            Ok(bytes) => postcard::from_bytes::<T>(&bytes).map_err(|e| {
-                agora_error_cause!(
-                    "core::Subscriber",
-                    "get_stream",
-                    "failed to deserialize stream value",
-                    e
-                )
-            }),
-            Err(e) => Err(agora_error_cause!(
+            Ok(bytes) => postcard::from_bytes::<T>(&bytes).context(agora_error!(
                 "core::Subscriber",
                 "get_stream",
-                "stream error",
-                e
+                "failed to deserialize stream value"
+            )),
+            Err(e) => Err(e).context(agora_error!(
+                "core::Subscriber",
+                "get_stream",
+                "stream error"
             )),
         });
 
@@ -146,14 +132,13 @@ impl OmniSubscriber {
         path: String,
         metaserver_connection: ConnectionHandle,
     ) -> OrError<OmniSubscriber> {
-        let metaclient = AgoraClient::new(metaserver_connection).await.map_err(|e| {
-            agora_error_cause!(
+        let metaclient = AgoraClient::new(metaserver_connection)
+            .await
+            .context(agora_error!(
                 "core::OmniSubscriber",
                 "new",
-                "failed to create AgoraClient",
-                e
-            )
-        })?;
+                "failed to create AgoraClient"
+            ))?;
 
         let normalized_path = strip_and_verify(&path)?;
 
@@ -164,27 +149,21 @@ impl OmniSubscriber {
         let string_path_str = format!("{}/string", normalized_path);
 
         let rawstreamclient: RawStreamClient<String> =
-            RawStreamClient::new(host_gateway_connection, &string_path_str, None, None).map_err(
-                |e| {
-                    agora_error_cause!(
-                        "core::OmniSubscriber",
-                        "new",
-                        "failed to create string rawstream client",
-                        e
-                    )
-                },
+            RawStreamClient::new(host_gateway_connection, &string_path_str, None, None).context(
+                agora_error!(
+                    "core::OmniSubscriber",
+                    "new",
+                    "failed to create string rawstream client"
+                )
             )?;
 
         let pingclient = PingClient::new(&normalized_path, host_gateway_connection)
             .await
-            .map_err(|e| {
-                agora_error_cause!(
-                    "core::OmniSubscriber",
-                    "new",
-                    "failed to create ping client",
-                    e
-                )
-            })?;
+            .context(agora_error!(
+                "core::OmniSubscriber",
+                "new",
+                "failed to create ping client"
+            ))?;
 
         Ok(Self {
             _metaclient: metaclient,
@@ -210,11 +189,10 @@ impl OmniSubscriber {
         let raw_stream = self.rawstreamclient.subscribe();
         let string_stream = raw_stream.map(|result| match result {
             Ok(string_value) => Ok(string_value),
-            Err(e) => Err(agora_error_cause!(
+            Err(e) => Err(e).context(agora_error!(
                 "core::OmniSubscriber",
                 "get_stream",
-                "stream error",
-                e
+                "stream error"
             )),
         });
 

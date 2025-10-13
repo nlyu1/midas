@@ -4,9 +4,10 @@
 use super::protocol::AgoraMetaClient;
 use super::publisher_info::PublisherInfo;
 use crate::ConnectionHandle;
-use crate::agora_error_cause;
+use crate::agora_error;
 use crate::utils::OrError;
 use crate::utils::{TreeNode, TreeNodeRef, TreeTrait};
+use anyhow::Context;
 use tarpc::{client, context, tokio_serde::formats::Json};
 
 /// TARPC client for metaserver RPC communication (service discovery and publisher lifecycle).
@@ -27,14 +28,11 @@ impl AgoraClient {
         transport.config_mut().max_frame_length(usize::MAX);
         let client = AgoraMetaClient::new(
             client::Config::default(),
-            transport.await.map_err(|e| {
-                agora_error_cause!(
-                    "metaserver::AgoraClient",
-                    "new",
-                    "failed to create tarpc client. Did you forget to start the metaserver?",
-                    e
-                )
-            })?,
+            transport.await.context(agora_error!(
+                "metaserver::AgoraClient",
+                "new",
+                "failed to create tarpc client. Did you forget to start the metaserver?"
+            ))?,
         )
         .spawn();
         Ok(Self {
@@ -50,48 +48,42 @@ impl AgoraClient {
         gateway_port: u16,
     ) -> OrError<PublisherInfo> {
         let host_connection = ConnectionHandle::new_local(gateway_port)?;
-        self.client
+        let rpc_result = self.client
             .register_publisher(context::current(), name, path, host_connection)
             .await
-            .map_err(|e| {
-                agora_error_cause!(
-                    "metaserver::AgoraClient",
-                    "register_publisher",
-                    format!(
-                        "RPC call failed. Are you pinging the metaserver at the correct port {}?",
-                        self.metaserver_connection
-                    ),
-                    e
+            .context(agora_error!(
+                "metaserver::AgoraClient",
+                "register_publisher",
+                &format!(
+                    "RPC call failed. Are you pinging the metaserver at the correct port {}?",
+                    self.metaserver_connection
                 )
-            })?
+            ))?;
+        rpc_result.map_err(|e| anyhow::anyhow!(e))
     }
 
     pub async fn confirm_publisher(&self, path: &str) -> OrError<()> {
-        self.client
+        let rpc_result = self.client
             .confirm_publisher(context::current(), path.to_string())
             .await
-            .map_err(|e| {
-                agora_error_cause!(
-                    "metaserver::AgoraClient",
-                    "confirm_publisher",
-                    "RPC call failed",
-                    e
-                )
-            })?
+            .context(agora_error!(
+                "metaserver::AgoraClient",
+                "confirm_publisher",
+                "RPC call failed"
+            ))?;
+        rpc_result.map_err(|e| anyhow::anyhow!(e))
     }
 
     pub async fn remove_publisher(&self, path: &str) -> OrError<PublisherInfo> {
-        self.client
+        let rpc_result = self.client
             .remove_publisher(context::current(), path.to_string())
             .await
-            .map_err(|e| {
-                agora_error_cause!(
-                    "metaserver::AgoraClient",
-                    "remove_publisher",
-                    "RPC call failed",
-                    e
-                )
-            })?
+            .context(agora_error!(
+                "metaserver::AgoraClient",
+                "remove_publisher",
+                "RPC call failed"
+            ))?;
+        rpc_result.map_err(|e| anyhow::anyhow!(e))
     }
 
     pub async fn get_path_tree(&self) -> OrError<TreeNodeRef> {
@@ -99,30 +91,25 @@ impl AgoraClient {
             .client
             .path_tree(context::current())
             .await
-            .map_err(|e| {
-                agora_error_cause!(
-                    "metaserver::AgoraClient",
-                    "get_path_tree",
-                    "RPC call failed",
-                    e
-                )
-            })?;
+            .context(agora_error!(
+                "metaserver::AgoraClient",
+                "get_path_tree",
+                "RPC call failed"
+            ))?;
 
         TreeNode::from_repr(&tree_repr)
     }
 
     pub async fn get_publisher_info(&self, path: &str) -> OrError<PublisherInfo> {
-        self.client
+        let rpc_result = self.client
             .publisher_info(context::current(), path.to_string())
             .await
-            .map_err(|e| {
-                agora_error_cause!(
-                    "metaserver::AgoraClient",
-                    "get_publisher_info",
-                    "RPC call failed",
-                    e
-                )
-            })?
+            .context(agora_error!(
+                "metaserver::AgoraClient",
+                "get_publisher_info",
+                "RPC call failed"
+            ))?;
+        rpc_result.map_err(|e| anyhow::anyhow!(e))
     }
 }
 

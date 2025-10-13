@@ -35,7 +35,7 @@ macro_rules! create_typed_relay {
                         dest_metaserver_connection.to_connection_handle(),
                         local_gateway_port,
                     ))
-                    .map_err(|e| PyRuntimeError::new_err(e))?;
+                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
                 Ok(Self { inner, rt })
             }
@@ -51,7 +51,7 @@ macro_rules! create_typed_relay {
                         self.inner
                             .swapon(src_path, src_metaserver_connection.to_connection_handle()),
                     )
-                    .map_err(|e| PyRuntimeError::new_err(e))
+                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))
             }
         }
     };

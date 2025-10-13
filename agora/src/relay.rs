@@ -3,7 +3,7 @@
 
 use crate::utils::{ConnectionHandle, OrError};
 use crate::{Agorable, Publisher, Subscriber};
-use crate::{agora_error, agora_error_cause};
+use crate::agora_error;
 use futures_util::StreamExt;
 
 /// Dynamic message router with fixed destination and switchable source.
@@ -49,8 +49,10 @@ impl<T: Agorable> Relay<T> {
         let stream_out = tokio::task::spawn(async move {
             while let Some(t) = rx.recv().await {
                 if let Err(e) = publisher.publish(t).await {
-                    eprintln!("{}", agora_error_cause!("relay::Relay", "stream_out",
-                        &format!("could not publish to {}", dest_path_), e));
+                    eprintln!("{}. Caused by -> {}",
+                        agora_error!("relay::Relay", "stream_out",
+                            &format!("could not publish to {}", dest_path_)),
+                        e);
                 }
             }
         });
@@ -101,8 +103,10 @@ impl<T: Agorable> Relay<T> {
                     }
                     Err(e) => {
                         // Stream error (deserialization, etc.) - logged, task exits
-                        eprintln!("{}", agora_error_cause!("relay::Relay", "swapon",
-                            &format!("stream error (relay: {} -> {})", src_path, dest_path), e));
+                        eprintln!("{}. Caused by -> {}",
+                            agora_error!("relay::Relay", "swapon",
+                                &format!("stream error (relay: {} -> {})", src_path, dest_path)),
+                            e);
                         break;
                     }
                 }

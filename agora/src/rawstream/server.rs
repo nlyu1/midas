@@ -2,7 +2,8 @@
 //! `RawStreamServer<T>` uses dual-task architecture: ingestion (receives from `publish()`) + connection handler (fans out to clients via `tokio::broadcast`).
 
 use crate::utils::{OrError, prepare_socket_path};
-use crate::{agora_error, agora_error_cause};
+use crate::agora_error;
+use anyhow::Context;
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::UnixListener;
 use tokio::sync::broadcast;
@@ -38,10 +39,11 @@ where
         prepare_socket_path(socket_path)?;
 
         // Bind Unix domain socket listener
-        let listener = UnixListener::bind(socket_path).map_err(|e|
-            agora_error_cause!("rawstream::RawStreamServer", "new",
-                &format!("failed to bind Unix socket at {}", socket_path), e)
-        )?;
+        let listener = UnixListener::bind(socket_path).context(agora_error!(
+            "rawstream::RawStreamServer",
+            "new",
+            &format!("failed to bind Unix socket at {}", socket_path)
+        ))?;
         // Create broadcast channel to fan out to all connected clients
         let buffer_capacity = buffer_size.unwrap_or(4096);
         let (broadcast_tx, _) = broadcast::channel::<T>(buffer_capacity);
@@ -91,7 +93,7 @@ where
     pub fn publish(&self, value: T) -> OrError<()> {
         self.sender
             .send(value)
-            .map_err(|_| agora_error!("rawstream::RawStreamServer", "publish", "channel closed"))
+            .map_err(|_| anyhow::anyhow!(agora_error!("rawstream::RawStreamServer", "publish", "channel closed")))
     }
 }
 

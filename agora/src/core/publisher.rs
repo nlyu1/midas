@@ -2,11 +2,12 @@
 //! and provides health check server. Handles registration sequence: register → create sockets → confirm.
 
 use super::Agorable;
-use crate::agora_error_cause;
+use crate::agora_error;
 use crate::metaserver::AgoraClient;
 use crate::ping::PingServer;
 use crate::rawstream::RawStreamServer;
 use crate::utils::{ConnectionHandle, OrError, strip_and_verify};
+use anyhow::Context;
 use std::marker::PhantomData;
 
 /// User interface for starting an Agora service.
@@ -40,9 +41,9 @@ impl<T: Agorable> Publisher<T> {
         local_gateway_port: u16,
     ) -> OrError<Self> {
         // Step 1: Connect to metaserver
-        let metaclient = AgoraClient::new(metaserver_connection).await.map_err(|e| {
-            agora_error_cause!("core::Publisher", "new", "failed to create AgoraClient", e)
-        })?;
+        let metaclient = AgoraClient::new(metaserver_connection)
+            .await
+            .context(agora_error!("core::Publisher", "new", "failed to create AgoraClient"))?;
 
         // Step 2: Register with metaserver (adds path to registry, not yet confirmed)
         let publisher_info = metaclient
@@ -63,38 +64,31 @@ impl<T: Agorable> Publisher<T> {
         let pingserver =
             PingServer::new(&normalized_path, vec_payload.clone(), str_payload.clone())
                 .await
-                .map_err(|e| {
-                    agora_error_cause!("core::Publisher", "new", "failed to create ping server", e)
-                })?;
+                .context(agora_error!("core::Publisher", "new", "failed to create ping server"))?;
 
         // Step 4b: Create binary rawstream server (for Subscriber\<T>)
         let rawstream_byteserver = RawStreamServer::new(&bytes_socket_path_str, None)
             .await
-            .map_err(|e| {
-                agora_error_cause!(
-                    "core::Publisher",
-                    "new",
-                    "failed to create byte rawstream server",
-                    e
-                )
-            })?;
+            .context(agora_error!(
+                "core::Publisher",
+                "new",
+                "failed to create byte rawstream server"
+            ))?;
 
         // Step 4c: Create string rawstream server (for OmniSubscriber)
         let rawstream_omniserver = RawStreamServer::new(&string_socket_path_str, None)
             .await
-            .map_err(|e| {
-                agora_error_cause!(
-                    "core::Publisher",
-                    "new",
-                    "failed to create string rawstream server",
-                    e
-                )
-            })?;
+            .context(agora_error!(
+                "core::Publisher",
+                "new",
+                "failed to create string rawstream server"
+            ))?;
 
         // Step 5: Confirm publisher (metaserver pings to verify sockets are live)
-        metaclient.confirm_publisher(&path).await.map_err(|e| {
-            agora_error_cause!("core::Publisher", "new", "failed to confirm publisher", e)
-        })?;
+        metaclient
+            .confirm_publisher(&path)
+            .await
+            .context(agora_error!("core::Publisher", "new", "failed to confirm publisher"))?;
 
         Ok(Self {
             rawstream_byteserver,
@@ -105,14 +99,11 @@ impl<T: Agorable> Publisher<T> {
     }
 
     fn value_to_payloads(value: &T) -> OrError<(Vec<u8>, String)> {
-        let vec_payload = postcard::to_allocvec(value).map_err(|e| {
-            agora_error_cause!(
-                "core::Publisher",
-                "value_to_payloads",
-                "failed to serialize value to bytes",
-                e
-            )
-        })?;
+        let vec_payload = postcard::to_allocvec(value).context(agora_error!(
+            "core::Publisher",
+            "value_to_payloads",
+            "failed to serialize value to bytes"
+        ))?;
         let str_payload = value.to_string();
         Ok((vec_payload, str_payload))
     }

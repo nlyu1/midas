@@ -4,7 +4,8 @@
 use super::PingResponse;
 use crate::utils::OrError;
 use crate::ConnectionHandle;
-use crate::{agora_error, agora_error_cause};
+use crate::agora_error;
+use anyhow::{bail, Context};
 use chrono::TimeDelta;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
@@ -47,8 +48,11 @@ impl PingClient {
 
         let (ws_stream, _) = connect_async(&url)
             .await
-            .map_err(|e| agora_error_cause!("ping::PingClient", "new",
-                &format!("failed to connect to {}", url), e))?;
+            .context(agora_error!(
+                "ping::PingClient",
+                "new",
+                &format!("failed to connect to {}", url)
+            ))?;
         let (ws_write, ws_read) = ws_stream.split();
 
         Ok(Self { ws_write, ws_read })
@@ -62,24 +66,27 @@ impl PingClient {
         self.ws_write
             .send(Message::Text("ping".to_string().into()))
             .await
-            .map_err(|e| agora_error_cause!("ping::PingClient", "ping", "failed to send ping", e))?;
+            .context(agora_error!("ping::PingClient", "ping", "failed to send ping"))?;
 
         // Wait for response
         if let Some(msg) = self.ws_read.next().await {
             match msg {
                 Ok(Message::Text(json)) => {
-                    let response: PingResponse = serde_json::from_str(&json)
-                        .map_err(|e| agora_error_cause!("ping::PingClient", "ping", "failed to parse response", e))?;
+                    let response: PingResponse = serde_json::from_str(&json).context(agora_error!(
+                        "ping::PingClient",
+                        "ping",
+                        "failed to parse response"
+                    ))?;
 
                     let time_delta = chrono::Utc::now().signed_duration_since(response.timestamp);
 
                     Ok((response.vec_payload, response.str_payload, time_delta))
                 }
-                Ok(_) => Err(agora_error!("ping::PingClient", "ping", "unexpected message type")),
-                Err(e) => Err(agora_error_cause!("ping::PingClient", "ping", "WebSocket error", e)),
+                Ok(_) => bail!(agora_error!("ping::PingClient", "ping", "unexpected message type")),
+                Err(e) => Err(e).context(agora_error!("ping::PingClient", "ping", "WebSocket error")),
             }
         } else {
-            Err(agora_error!("ping::PingClient", "ping", "connection closed"))
+            bail!(agora_error!("ping::PingClient", "ping", "connection closed"));
         }
     }
 }

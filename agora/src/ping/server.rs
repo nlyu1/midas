@@ -3,7 +3,8 @@
 
 use super::PingResponse;
 use crate::utils::{OrError, prepare_socket_path};
-use crate::agora_error_cause;
+use crate::agora_error;
+use anyhow::Context;
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use std::sync::{Arc, RwLock};
@@ -39,10 +40,11 @@ impl PingServer {
         let socket_path = format!("/tmp/agora/{}/ping.sock", agora_path);
         prepare_socket_path(&socket_path)?;
 
-        let listener = UnixListener::bind(&socket_path).map_err(|e|
-            agora_error_cause!("ping::PingServer", "new",
-                &format!("failed to bind socket at {}", socket_path), e)
-        )?;
+        let listener = UnixListener::bind(&socket_path).context(agora_error!(
+            "ping::PingServer",
+            "new",
+            &format!("failed to bind socket at {}", socket_path)
+        ))?;
 
         let payload = Arc::new(RwLock::new(Payload {
             vec_payload,

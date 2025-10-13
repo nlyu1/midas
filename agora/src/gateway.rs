@@ -3,6 +3,7 @@
 
 use crate::ConnectionHandle;
 use crate::utils::OrError;
+use anyhow::{bail, Context};
 use futures_util::{SinkExt, StreamExt};
 use local_ip_address::local_ip;
 use tokio::net::{TcpListener, UnixStream};
@@ -25,13 +26,13 @@ impl Gateway {
     /// Error: Bind fails → propagates to caller. Connection errors logged per-connection.
     /// Called by: User code (main gateway process)
     pub async fn new(port: u16) -> OrError<Self> {
-        let ip = local_ip().map_err(|e| format!("Agora Gateway error: cannot get own ip {}", e))?;
+        let ip = local_ip().context("Agora Gateway error: cannot get own ip")?;
         let connection = ConnectionHandle::new(ip, port);
 
         let addr = std::net::SocketAddr::new(ip, port);
         let listener = TcpListener::bind(&addr)
             .await
-            .map_err(|e| format!("Failed to bind gateway to {}: {}", addr, e))?;
+            .context(format!("Failed to bind gateway to {}", addr))?;
 
         eprintln!("Agora Gateway listening on {}", addr);
 
@@ -95,22 +96,22 @@ async fn handle_connection(tcp_stream: tokio::net::TcpStream) -> OrError<()> {
         }
     })
     .await
-    .map_err(|e| format!("WebSocket upgrade failed: {}", e))?;
+    .context("WebSocket upgrade failed")?;
 
     if agora_path.is_empty() || service_type.is_empty() {
-        return Err("Failed to extract path from request".to_string());
+        bail!("Failed to extract path from request");
     }
 
     // Connect to local UDS endpoint
     let uds_path = format!("/tmp/agora/{}/{}.sock", agora_path, service_type);
     let unix_stream = UnixStream::connect(&uds_path)
         .await
-        .map_err(|e| format!("Failed to connect to UDS {}: {}", uds_path, e))?;
+        .context(format!("Failed to connect to UDS {}", uds_path))?;
 
     // Upgrade UDS to WebSocket
     let (uds_ws_stream, _) = client_async("ws://localhost/", unix_stream)
         .await
-        .map_err(|e| format!("Failed to upgrade UDS to WebSocket: {}", e))?;
+        .context("Failed to upgrade UDS to WebSocket")?;
 
     // Split both WebSocket streams for bidirectional forwarding
     let (mut ext_write, mut ext_read) = ws_stream.split();

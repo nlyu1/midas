@@ -35,7 +35,7 @@ macro_rules! create_typed_publisher {
                         metaserver_connection.to_connection_handle(),
                         local_gateway_port,
                     ))
-                    .map_err(|e| PyRuntimeError::new_err(e))?;
+                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
                 Ok(Self { inner, rt })
             }
@@ -44,7 +44,7 @@ macro_rules! create_typed_publisher {
                 self
                     .rt
                     .block_on(self.inner.publish(value))
-                    .map_err(|e| PyRuntimeError::new_err(e))
+                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))
             }
         }
     };

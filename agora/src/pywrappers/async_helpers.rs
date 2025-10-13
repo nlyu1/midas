@@ -19,7 +19,7 @@ macro_rules! create_py_result_iterator {
                 match self.inner.next() {
                     Some(result) => match result {
                         Ok(value) => Ok(Some(value)),
-                        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e)),
+                        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
                     },
                     None => Ok(None),
                 }

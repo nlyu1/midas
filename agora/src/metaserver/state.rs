@@ -5,7 +5,8 @@ use super::publisher_info::PublisherInfo;
 use crate::ConnectionHandle;
 use crate::ping::PingClient;
 use crate::utils::{OrError, TreeNode, TreeNodeRef, TreeTrait};
-use crate::{agora_error, agora_error_cause};
+use crate::agora_error;
+use anyhow::{bail, Context};
 use std::collections::HashMap;
 
 /// Shared metaserver state managing publisher registry, path tree hierarchy, and health checks.
@@ -52,7 +53,7 @@ impl ServerState {
         // Check for duplicate registration
         if self.publishers.contains_key(&path) {
             let publisher_info = self.publishers.get(&path).unwrap();
-            return Err(agora_error!(
+            bail!(agora_error!(
                 "metaserver::ServerState",
                 "register_publisher",
                 &format!(
@@ -67,7 +68,7 @@ impl ServerState {
 
         // Path must be new (not existing directory node)
         if self.path_tree.get_child(&path).is_ok() {
-            return Err(agora_error!(
+            bail!(agora_error!(
                 "metaserver::ServerState",
                 "register_publisher",
                 &format!(
@@ -96,7 +97,7 @@ impl ServerState {
     /// Called by: `AgoraMetaServer` (TARPC) ← `AgoraClient::confirm_publisher` ← `Publisher::new`
     pub async fn confirm_publisher(&mut self, path: &str) -> OrError<()> {
         if !self.publishers.contains_key(path) {
-            return Err(agora_error!(
+            bail!(agora_error!(
                 "metaserver::ServerState",
                 "confirm_publisher",
                 &format!("please register path {} before confirming", path)
@@ -104,7 +105,7 @@ impl ServerState {
         }
 
         if self.confirmed_publishers.contains_key(path) {
-            return Err(agora_error!(
+            bail!(agora_error!(
                 "metaserver::ServerState",
                 "confirm_publisher",
                 &format!("path {} already registered and confirmed", path)
@@ -116,19 +117,18 @@ impl ServerState {
         // Create ping client - if fails, auto-remove registration
         let mut pingclient = PingClient::new(path, *publisher_info.connection())
             .await
-            .map_err(|e| {
+            .inspect_err(|_e| {
                 let _ = self.remove_publisher(path);
                 eprintln!(
                     "Removed registered publisher {} upon unsuccessful confirmation",
                     path
                 );
-                agora_error_cause!(
-                    "metaserver::ServerState",
-                    "confirm_publisher",
-                    "failed to create ping client. Are you running the gateway?",
-                    e
-                )
-            })?;
+            })
+            .context(agora_error!(
+                "metaserver::ServerState",
+                "confirm_publisher",
+                "failed to create ping client. Are you running the gateway?"
+            ))?;
 
         // Test ping - if fails, auto-remove registration
         let _ = pingclient.ping().await.inspect_err(|_| {
@@ -160,7 +160,7 @@ impl ServerState {
                 self.confirmed_publishers.remove(path);
                 Ok(publisher_info)
             }
-            None => Err(agora_error!(
+            None => bail!(agora_error!(
                 "metaserver::ServerState",
                 "remove_publisher",
                 &format!("path '{}' is not associated with any publishers", path)
@@ -184,22 +184,19 @@ impl ServerState {
         ) {
             (Some(publisher), Some(pingclient)) => {
                 // Ping before returning to ensure publisher is alive
-                pingclient.ping().await.map_err(|e| {
-                    agora_error_cause!(
-                        "metaserver::ServerState",
-                        "get_publisher_info",
-                        &format!("cannot ping {}. Publisher might be stale", path),
-                        e
-                    )
-                })?;
+                pingclient.ping().await.context(agora_error!(
+                    "metaserver::ServerState",
+                    "get_publisher_info",
+                    &format!("cannot ping {}. Publisher might be stale", path)
+                ))?;
                 Ok(publisher.clone())
             }
-            (Some(_), None) => Err(agora_error!(
+            (Some(_), None) => bail!(agora_error!(
                 "metaserver::ServerState",
                 "get_publisher_info",
                 &format!("publisher at {} is registered but not confirmed", path)
             )),
-            (None, _) => Err(agora_error!(
+            (None, _) => bail!(agora_error!(
                 "metaserver::ServerState",
                 "get_publisher_info",
                 &format!("publisher not registered at {}", path)
@@ -209,7 +206,7 @@ impl ServerState {
 
     fn validate_path_format(&self, path: &str) -> OrError<()> {
         if path.is_empty() {
-            return Err(agora_error!(
+            bail!(agora_error!(
                 "metaserver::ServerState",
                 "validate_path_format",
                 "path cannot be empty"
@@ -217,7 +214,7 @@ impl ServerState {
         }
 
         if path.starts_with('/') {
-            return Err(agora_error!(
+            bail!(agora_error!(
                 "metaserver::ServerState",
                 "validate_path_format",
                 &format!(
@@ -227,7 +224,7 @@ impl ServerState {
             ));
         }
         if path.ends_with('/') {
-            return Err(agora_error!(
+            bail!(agora_error!(
                 "metaserver::ServerState",
                 "validate_path_format",
                 &format!(
@@ -238,7 +235,7 @@ impl ServerState {
         }
 
         if path.contains("//") {
-            return Err(agora_error!(
+            bail!(agora_error!(
                 "metaserver::ServerState",
                 "validate_path_format",
                 &format!("path '{}' contains double slashes '//' - not allowed", path)
@@ -248,7 +245,7 @@ impl ServerState {
         let segments: Vec<&str> = path.split('/').collect();
         for (i, segment) in segments.iter().enumerate() {
             if segment.is_empty() {
-                return Err(agora_error!(
+                bail!(agora_error!(
                     "metaserver::ServerState",
                     "validate_path_format",
                     &format!(
@@ -259,7 +256,7 @@ impl ServerState {
             }
 
             if segment.trim() != *segment {
-                return Err(agora_error!(
+                bail!(agora_error!(
                     "metaserver::ServerState",
                     "validate_path_format",
                     &format!(
@@ -293,7 +290,7 @@ impl ServerState {
 
             // Error if parent is a publisher
             if self.publishers.contains_key(&current_path) {
-                return Err(agora_error!(
+                bail!(agora_error!(
                     "metaserver::ServerState",
                     "validate_parent_paths_are_directories",
                     &format!(

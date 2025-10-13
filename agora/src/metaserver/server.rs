@@ -6,7 +6,7 @@ use super::protocol::AgoraMeta;
 use super::publisher_info::PublisherInfo;
 use crate::ConnectionHandle;
 use crate::constants::CHECK_PUBLISHER_LIVELINESS_EVERY_MS;
-use crate::utils::OrError;
+use crate::utils::RpcError;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -38,19 +38,19 @@ impl AgoraMeta for AgoraMetaServer {
         name: String,
         path: String,
         host_connection: ConnectionHandle,
-    ) -> OrError<PublisherInfo> {
+    ) -> RpcError<PublisherInfo> {
         let mut state = self.state.write().await;
-        state.register_publisher(name, path, host_connection)
+        state.register_publisher(name, path, host_connection).map_err(|e| e.to_string())
     }
 
-    async fn confirm_publisher(self, _: context::Context, path: String) -> OrError<()> {
+    async fn confirm_publisher(self, _: context::Context, path: String) -> RpcError<()> {
         let mut state = self.state.write().await;
-        state.confirm_publisher(&path).await
+        state.confirm_publisher(&path).await.map_err(|e| e.to_string())
     }
 
-    async fn remove_publisher(self, _: context::Context, path: String) -> OrError<PublisherInfo> {
+    async fn remove_publisher(self, _: context::Context, path: String) -> RpcError<PublisherInfo> {
         let mut state = self.state.write().await;
-        state.remove_publisher(&path)
+        state.remove_publisher(&path).map_err(|e| e.to_string())
     }
 
     async fn path_tree(self, _: context::Context) -> String {
@@ -58,9 +58,9 @@ impl AgoraMeta for AgoraMetaServer {
         state.get_path_tree_repr()
     }
 
-    async fn publisher_info(self, _: context::Context, path: String) -> OrError<PublisherInfo> {
+    async fn publisher_info(self, _: context::Context, path: String) -> RpcError<PublisherInfo> {
         let mut state = self.state.write().await;
-        state.get_publisher_info(&path).await
+        state.get_publisher_info(&path).await.map_err(|e| e.to_string())
     }
 }
 
