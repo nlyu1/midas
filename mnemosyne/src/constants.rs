@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 /// Home directory - to be expanded at runtime
 pub fn home_path() -> PathBuf {
-    dirs::home_dir().unwrap()
+    PathBuf::from("/")
 }
 
 /// Assumes that there'll be 'asset_ctxs', 'market_data', 'trades' beneath
