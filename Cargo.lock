@@ -2194,6 +2194,7 @@ dependencies = [
  "reqwest",
  "serde",
  "tokio",
+ "walkdir",
  "zip",
 ]
 

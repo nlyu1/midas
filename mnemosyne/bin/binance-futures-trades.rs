@@ -3,6 +3,8 @@ use chrono::NaiveDate;
 use mnemosyne::constants::{BINANCE_DATA_PATH, home_path};
 use mnemosyne::crypto::binance::BinanceDataInterface;
 use mnemosyne::crypto::binance::BinanceUmFuturesTradeBook;
+use polars::prelude::*;
+use std::fs;
 use std::sync::Arc;
 
 #[tokio::main]
@@ -29,13 +31,18 @@ async fn main() -> Result<()> {
     )?);
 
     // Initialize universe (no refresh)
-    tb.initialize_universe(true).await?;
+    tb.initialize_universe(false).await?;
 
     // Get universe_df and print head
-    let universe_df = tb.get_universe_df().await?;
+    let mut universe_df = tb.get_universe_df().await?;
     println!("Universe shape: {:?}", universe_df.shape());
     println!("\nUniverse head:");
     println!("{}", universe_df.head(Some(10)));
+
+    let mut file = fs::File::create(base_path.join("local_scan.parquet"))?;
+    ParquetWriter::new(&mut file)
+        .with_compression(ParquetCompression::Zstd(Some(ZstdLevel::try_new(3)?)))
+        .finish(&mut universe_df)?;
 
     // Get symbol date for BTC, 2025-10-05
     let test_date = NaiveDate::from_ymd_opt(2025, 10, 5).unwrap();
@@ -46,7 +53,10 @@ async fn main() -> Result<()> {
     println!("\nBTC 2025-10-05 shape: {:?}", collected.shape());
     println!("{}", collected.head(Some(5)));
 
-    let update_stats = tb.update_universe(16).await?;
+    let diff = tb.nohive_symbol_date_pairs(false).await?;
+    println!("Diff:{}\n. Length {}", diff, diff.height());
+
+    let update_stats = tb.update_universe(16, false).await?;
     println!("{:?}", update_stats);
     Ok(())
 }

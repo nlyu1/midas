@@ -159,7 +159,7 @@ fn process_zip_to_parquet<S: BinanceCsvSchema>(
     // Write parquet with optimized settings
     let mut file = fs::File::create(hive_path)?;
     ParquetWriter::new(&mut file)
-        .with_compression(ParquetCompression::Zstd(Some(ZstdLevel::try_new(3)?)))
+        .with_compression(ParquetCompression::Lz4Raw)
         .finish(&mut df)?;
 
     println!("{} {} {}", symbol, date, num_rows);

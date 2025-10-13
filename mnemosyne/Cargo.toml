@@ -17,7 +17,7 @@ name = "binance-futures-trades"
 path = "bin/binance-futures-trades.rs"
 
 [[bin]]
-name = "dev.rs"
+name = "dev"
 path = "bin/dev.rs"
 
 [dependencies]
@@ -38,4 +38,5 @@ regex = "1.12.1"
 reqwest = { version = "0.12.23", features = ["json"] }
 serde = { version = "1.0.228", features = ["derive"] }
 tokio = { version = "1.47.1", features = ["full"] }
+walkdir = "2.5.0"
 zip = "6.0.0"
