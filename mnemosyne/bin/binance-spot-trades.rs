@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
     )?);
 
     // Initialize universe (no refresh)
-    tb.initialize_universe(false).await?;
+    tb.initialize_universe(true).await?;
 
     // Get universe_df and print head
     let universe_df = tb.get_universe_df().await?;
@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
     println!("\nBTC 2025-10-05 shape: {:?}", collected.shape());
     println!("{}", collected.head(Some(5)));
 
-    let update_stats = tb.update_universe(32, false).await?;
+    let update_stats = tb.update_universe(32, true).await?;
     println!("{:?}", update_stats);
     Ok(())
 }

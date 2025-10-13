@@ -510,6 +510,6 @@ import polars as pl
 from mnemosyne.constants import BINANCE_DATA_PATH
 
 path = BINANCE_DATA_PATH / "spot/last_trade/peg_symbol=USDT"
-pl.read_parquet(path / "hive_symbol_date_pairs.parquet")
+pl.read_parquet(path / "hive_symbol_date_pairs.parquet").schema
 # %%
 list(path.glob("*.parquet"))

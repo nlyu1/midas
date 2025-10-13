@@ -6,6 +6,7 @@ use chrono::NaiveDate;
 pub use last_trades::{BinanceSpotTradeBook, BinanceUmFuturesTradeBook};
 use polars::prelude::*;
 use rayon::prelude::*;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -36,14 +37,8 @@ pub trait BinanceCsvSchema: Send + Sync + 'static {
 
 /// Helper function to extract (symbol, date) from first row of a parquet file
 /// Returns None if file is corrupted (and deletes it)
-fn extract_symbol_date_first_row(
-    entry_result: Result<walkdir::DirEntry, walkdir::Error>,
-) -> Option<LazyFrame> {
-    let entry = entry_result.ok()?;
-    let path = entry.path();
-    if !path.ends_with("data.parquet") {
-        return None;
-    }
+/// Path checking (ends_with "data.parquet") should be done by caller
+fn extract_symbol_date_first_row(path: &Path) -> Option<LazyFrame> {
     let path_str = path.display().to_string();
 
     // Helper to delete corrupted file and report
@@ -214,18 +209,38 @@ pub trait BinanceDataInterface: Send + Sync + Sized {
         Ok(universe_df)
     }
 
+    fn hive_symbol_date_cache_path(&self) -> PathBuf {
+        self.hive_data_path().join("hive_symbol_date_pairs.parquet")
+    }
+
     /// Get (symbol, date) pairs that exist on disk (with caching)
     async fn hive_symbol_date_pairs(
         &self,
         recompute: bool,
-        start_from_cache: bool,
     ) -> Result<DataFrame> {
-        let cache_path = self.hive_data_path().join("hive_symbol_date_pairs.parquet");
+        let cache_path = self.hive_symbol_date_cache_path();
 
         // Recompute if requested or cache doesn't exist
         if recompute || !cache_path.exists() {
-            cached_pairs = if start_from_cache then (read and pass into compute_hive_symbol_date_pairs)
-            let hive_df = self.compute_hive_symbol_date_pairs().await?;
+            // When recomputing, always try to use existing cache to avoid re-validating all files
+            let cached_pairs = if cache_path.exists() {
+                let cache_path_str = cache_path
+                    .to_str()
+                    .context("Invalid cache path")?
+                    .to_string();
+                Some(
+                    tokio::task::spawn_blocking(move || {
+                        LazyFrame::scan_parquet(PlPath::new(&cache_path_str), Default::default())?
+                            .collect()
+                            .context("Failed to read existing cache")
+                    })
+                    .await??,
+                )
+            } else {
+                None
+            };
+
+            let hive_df = self.compute_hive_symbol_date_pairs(cached_pairs).await?;
 
             // Write to cache
             let cache_path_clone = cache_path.clone();
@@ -264,29 +279,81 @@ pub trait BinanceDataInterface: Send + Sync + Sized {
     ) -> Result<DataFrame> {
         let hive_data_path = self.hive_data_path().to_path_buf();
 
+        // Build HashSet of known paths from cache
+        let (known_paths, cached_lf) = if let Some(ref cached) = cached_pairs {
+            println!("Read {} symbol-date pairs from cache", cached.height());
+
+            let symbol_col = cached.column("symbol")?.str()?;
+            let date_col = cached.column("date")?.date()?;
+
+            let mut set = HashSet::new();
+            for i in 0..cached.height() {
+                if let (Some(symbol), Some(days_since_epoch)) =
+                    (symbol_col.get(i), date_col.phys.get(i))
+                {
+                    // Polars Date is stored as days since Unix epoch (1970-01-01)
+                    if let Some(date) =
+                        NaiveDate::from_num_days_from_ce_opt(days_since_epoch + 719163)
+                    {
+                        let hive_path = self.build_hive_path(symbol, date);
+                        set.insert(hive_path.to_string_lossy().to_string());
+                    }
+                }
+            }
+            (set, Some(cached.clone().lazy()))
+        } else {
+            (HashSet::new(), None)
+        };
+
         // Wrap in spawn_blocking to avoid nested runtime issues
         let result = tokio::task::spawn_blocking(move || {
             println!("Scanning and validating parquet files in parallel...");
 
-            // Parallelize validation directly on the iterator
-            let lazyframes: Vec<LazyFrame> = WalkDir::new(&hive_data_path)
+            // Parallelize validation: only validate NEW files not in cache
+            let new_lazyframes: Vec<LazyFrame> = WalkDir::new(&hive_data_path)
                 .min_depth(1)
                 .into_iter()
                 .par_bridge()
-                .filter_map(extract_symbol_date_first_row)
+                .filter_map(|entry_result| {
+                    let entry = entry_result.ok()?;
+                    let path = entry.path();
+
+                    // Filter: must end with data.parquet
+                    if !path.ends_with("data.parquet") {
+                        return None;
+                    }
+                    let path_str = path.to_string_lossy().to_string();
+                    // Skip if already in cache
+                    if known_paths.contains(&path_str) {
+                        return None;
+                    }
+                    // Expensive operation: download & unzip data for symbol date path
+                    extract_symbol_date_first_row(path)
+                })
                 .collect();
 
-            if lazyframes.is_empty() {
-                // No files on disk yet, return empty DataFrame with correct schema
+            println!(
+                "Collected {} additional symbol-date pairs",
+                new_lazyframes.len()
+            );
+            // Build final result: cached_pairs + new data
+            if new_lazyframes.is_empty() && cached_lf.is_none() {
+                // No files at all
                 return Ok(DataFrame::empty_with_schema(&Schema::from_iter(vec![
                     Field::new("symbol".into(), DataType::String),
                     Field::new("date".into(), DataType::Date),
                 ])));
             }
-
-            // Concatenate all validated LazyFrames
+            let mut all_frames = Vec::new();
+            // Add cached data first
+            if let Some(lf) = cached_lf {
+                all_frames.push(lf);
+            }
+            // Add new data
+            all_frames.extend(new_lazyframes);
+            // Concatenate all
             let onhive_keys = concat(
-                lazyframes,
+                all_frames,
                 UnionArgs {
                     parallel: true,
                     rechunk: false,
@@ -306,9 +373,14 @@ pub trait BinanceDataInterface: Send + Sync + Sized {
     }
 
     /// Calculate missing (symbol, date) pairs (universe - on_disk)
-    async fn nohive_symbol_date_pairs(&self, recompute: bool) -> Result<DataFrame> {
+    async fn nohive_symbol_date_pairs(
+        &self,
+        recompute: bool,
+    ) -> Result<DataFrame> {
         let universe_df = self.get_universe_df().await?;
-        let hive_df = self.hive_symbol_date_pairs(recompute).await?;
+        let hive_df = self
+            .hive_symbol_date_pairs(recompute)
+            .await?;
 
         // Perform anti-join in blocking task
         let result = tokio::task::spawn_blocking(move || {
@@ -408,9 +480,6 @@ pub trait BinanceDataInterface: Send + Sync + Sized {
     /// Uses rayon for thread-level parallelism with per-thread tokio runtimes.
     /// Each thread calls ensure_data_ready to perform async I/O for downloads
     /// and blocking I/O for processing.
-    ///
-    /// Control parallelism with RAYON_NUM_THREADS environment variable (default = num CPUs)
-    /// Set RUST_MIN_STACK=16777216 (16MB) to prevent stack overflow
     async fn update_universe(
         self: Arc<Self>,
         _num_workers: usize,
@@ -445,7 +514,6 @@ pub trait BinanceDataInterface: Send + Sync + Sized {
         }
 
         println!("Found {} missing (symbol, date) pairs", pairs.len());
-        println!("Starting parallel download...");
 
         // Process pairs in parallel using rayon + per-thread tokio runtimes
         let results: Vec<(String, NaiveDate, String, Option<String>)> = pairs
@@ -494,7 +562,6 @@ pub trait BinanceDataInterface: Send + Sync + Sized {
                 .filter(|(_, _, status, _)| !matches!(status.as_str(), "success" | "skipped"))
                 .count(),
         };
-
         // Print errors if any
         let errors: Vec<_> = results
             .iter()
@@ -510,10 +577,12 @@ pub trait BinanceDataInterface: Send + Sync + Sized {
                 println!("  ... and {} more", errors.len() - 10);
             }
         }
-
         println!(
-            "✓ Completed: {} successful, {} skipped, {} failed",
-            stats.success, stats.skipped, stats.failed
+            "✓ Completed: {} successful, {} skipped, {} failed\nHive symbol-date cache is at {}",
+            stats.success,
+            stats.skipped,
+            stats.failed,
+            self.hive_symbol_date_cache_path().to_string_lossy()
         );
 
         Ok(stats)
