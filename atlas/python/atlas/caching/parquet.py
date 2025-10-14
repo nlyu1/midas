@@ -1,18 +1,9 @@
 import polars as pl
 import asyncio
-from .utils import printv
+from ..utils import printv
 import functools
 from pathlib import Path
 from typing import Callable, Any
-
-
-async def run_polars_query(lf: pl.LazyFrame, engine="streaming") -> pl.DataFrame:
-    result = await lf.collect_async(engine=engine)
-    return result
-
-
-def polars_task_query(q: pl.LazyFrame, engine="streaming"):
-    return asyncio.create_task(run_polars_query(q, engine))
 
 
 def cache_parquet(
