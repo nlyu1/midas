@@ -1,6 +1,39 @@
+/// S3 API utilities for Binance public data bucket.
+///
+/// ## Purpose
+/// Query `s3-ap-northeast-1.amazonaws.com/data.binance.vision` via XML API to discover available data files.
+/// Handles S3's 1000-result pagination limit automatically.
+///
+/// ## Functions
+/// - **get_all_keys**: List files (object keys) under a prefix
+/// - **get_all_trade_pairs**: List subdirectories (CommonPrefixes) under a prefix
+///
+/// ## S3 API Details
+/// Uses `?prefix=...&delimiter=/` query pattern:
+/// - `prefix`: filters keys hierarchically
+/// - `delimiter=/`: enables directory-style listing (CommonPrefixes)
+/// - Pagination: `IsTruncated=true` + `NextMarker` token
+
 use anyhow::Result;
 use quick_xml::Reader;
 use quick_xml::events::Event;
+
+/// Normalize S3 prefix: ensure "data/" prefix and trailing "/" (S3 API requirement)
+/// Example: "spot/daily/trades" → "data/spot/daily/trades/"
+#[inline]
+fn normalize_s3_prefix(prefix: &str) -> String {
+    let with_data = if !prefix.starts_with("data/") {
+        format!("data/{}", prefix)
+    } else {
+        prefix.to_string()
+    };
+
+    if !with_data.ends_with("/") {
+        format!("{}/", with_data)
+    } else {
+        with_data
+    }
+}
 
 /// List all S3 object keys (files) under a prefix with automatic pagination.
 /// Handles S3's 1000-key response limit by following NextMarker tokens.
@@ -9,19 +42,12 @@ pub async fn get_all_keys(base_url: &str, prefix: &str) -> Result<Vec<String>> {
     let mut all_keys = Vec::new();
     let mut marker: Option<String> = None; // Pagination token for S3 API
 
-    // Normalize prefix: S3 API expects "data/" prefix and trailing "/"
-    let prefix = if !prefix.starts_with("data/") {
-        format!("data/{}", prefix)
-    } else {
-        prefix.to_string()
-    };
-    let prefix = if !prefix.ends_with("/") {
-        format!("{}/", prefix)
-    } else {
-        prefix
-    };
+    let prefix = normalize_s3_prefix(prefix);
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .build()?;
 
     // Pagination loop: S3 API returns max 1000 keys per request
     loop {
@@ -82,19 +108,12 @@ pub async fn get_all_trade_pairs(base_url: &str, prefix: &str) -> Result<Vec<Str
     let mut trade_pairs = std::collections::HashSet::new(); // Dedup
     let mut marker: Option<String> = None; // Pagination token
 
-    // Normalize prefix format for S3 API
-    let fixed_prefix = if !prefix.starts_with("data/") {
-        format!("data/{}", prefix)
-    } else {
-        prefix.to_string()
-    };
-    let fixed_prefix = if !fixed_prefix.ends_with("/") {
-        format!("{}/", fixed_prefix)
-    } else {
-        fixed_prefix
-    };
+    let fixed_prefix = normalize_s3_prefix(prefix);
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .build()?;
 
     // Pagination loop: fetch all subdirectories
     loop {

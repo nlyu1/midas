@@ -1,0 +1,14 @@
+[tool.uv.workspace]
+members = ["agora", "atlas", "metis", "mnemosyne", "template"]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0",
+    "mypy>=1.0",
+    "ruff>=0.3.0",
+    "maturin>=1.9",
+    "ipykernel>=6.30.0",
+]
+
+[tool.uv.sources]
+# Placeholder for workspace sources configuration

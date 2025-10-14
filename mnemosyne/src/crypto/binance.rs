@@ -1,3 +1,15 @@
+/// Binance data collection: constants, schemas, and type aliases.
+///
+/// ## Organization
+/// - **Constants**: S3 URLs, timestamp cutoffs
+/// - **Traits**: `BinanceCsvSchema` for compile-time CSV format configuration
+/// - **Type Aliases**: `BinanceSpotTradeBook`, `BinanceUmFuturesTradeBook`
+/// - **Modules**: `last_trades` (download/process), `s3_helpers` (S3 API queries)
+///
+/// ## Key Design Decision
+/// Timestamp format changed at 2025-01-01 (milliseconds → microseconds).
+/// All processing normalizes to microseconds for uniform Datetime representation.
+
 pub mod last_trades;
 pub mod s3_helpers;
 

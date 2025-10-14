@@ -1,5 +1,6 @@
 [build-system]
 requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "atlas"
@@ -10,15 +11,10 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dynamic = ["version"]
+dependencies = [
+    "polars>=1.32.0",
+]
 
 [tool.maturin]
 python-source = "python"
 features = ["pyo3/extension-module"]
-
-[tool.poetry]
-package-mode = false
-
-[[tool.poetry.source]]
-name = "nvidia"
-url = "https://pypi.nvidia.com"
-priority = "explicit"

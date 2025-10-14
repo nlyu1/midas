@@ -1,8 +1,6 @@
 # from .agora import * # Expose all rust definitions
-from . import agora as agora_rust # rename the backend 
-from .more import sum_again
+from . import agora as _agora_ext # rename the backend 
+from .more import agora
 
-__doc__ = agora_rust.__doc__
-# if hasattr(agora_rust, "__all__"):
-#     __all__ = agora_urust.__all__
-__all__ = []
+__doc__ = _agora_ext.__doc__
+__all__ = [_agora_ext.__all__]

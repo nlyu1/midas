@@ -1,3 +1,25 @@
+/// Binance trade data downloader with schema-parameterized CSV parsing.
+///
+/// ## Overview
+/// Implements lossless collection of Binance spot and futures last_trade data via:
+/// - S3 universe discovery (all available symbol-date pairs)
+/// - Parallel download from Binance public CDN
+/// - CSV→Parquet conversion with timestamp normalization
+/// - Hive-partitioned storage: `date={date}/symbol={symbol}/data.parquet`
+///
+/// ## Data Sources
+/// - **Spot**: `https://data.binance.vision/data/spot/daily/trades/{SYMBOL}USDT/{SYMBOL}USDT-trades-{date}.zip`
+/// - **UM Futures**: `https://data.binance.vision/data/futures/um/daily/trades/{SYMBOL}USDT/{SYMBOL}USDT-trades-{date}.zip`
+///
+/// ## Schema Handling
+/// Uses compile-time type parameter `S: BinanceCsvSchema` to handle format differences:
+/// - **SpotTradeSchema**: 7 columns, no header
+/// - **UmFuturesTradeSchema**: 6 columns, has header (missing `is_best_match`)
+///
+/// ## Timestamp Normalization
+/// Binance changed format at 2025-01-01: pre-2025 milliseconds → post-2025 microseconds.
+/// All data normalized to microseconds for consistent Datetime type.
+
 use crate::crypto::CryptoDataInterface;
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
@@ -320,6 +342,7 @@ impl<S: BinanceCsvSchema> CryptoDataInterface for BinanceTradeBook<S> {
     /// Returns DataFrame: ["symbol": String, "date": Date]
     async fn fetch_new_universe(&self) -> Result<DataFrame> {
         // Phase 1: Discover trading pairs (e.g., BTCUSDT, ETHUSDT) for this market
+        println!("Fetching new universe...waiting for trade pairs");
         let trade_pairs = get_all_trade_pairs(&self.base_url, &self.prefix).await?;
         let peg_suffix = &self.peg_symbol;
         // Filter to requested peg (e.g., keep BTCUSDT, discard BTCUSDC)
@@ -328,33 +351,48 @@ impl<S: BinanceCsvSchema> CryptoDataInterface for BinanceTradeBook<S> {
             .filter(|x| x.ends_with(peg_suffix))
             .map(|x| x.strip_suffix(peg_suffix).unwrap().to_string())
             .collect();
+        println!("Fetching new universe...fetched all trade pairs. Waiting");
 
         // Phase 2: Fetch dates for each symbol concurrently (parallel S3 queries)
         let mut tasks = Vec::new();
         for symbol in symbols {
+            let symbol_clone = symbol.clone(); 
             let base_url = self.base_url.clone();
             let peg_symbol = self.peg_symbol.clone();
             let prefix = format!("{}/{}{}", self.prefix, symbol, peg_symbol);
+            println!("Universe computation for {}", symbol);
             tasks.push(async move {
-                let paths = get_all_keys(&base_url, &prefix).await?;
-                let paths: Vec<String> = paths
-                    .into_iter()
-                    .filter(|x| !x.ends_with(".CHECKSUM")) // Exclude checksum files
-                    .collect();
+                // Add per-symbol timeout (60 seconds) to prevent individual symbols from hanging
+                let timeout_duration = std::time::Duration::from_secs(60);
+                let result = tokio::time::timeout(timeout_duration, async {
+                    let paths = get_all_keys(&base_url, &prefix).await?;
+                    let paths: Vec<String> = paths
+                        .into_iter()
+                        .filter(|x| !x.ends_with(".CHECKSUM")) // Exclude checksum files
+                        .collect();
 
-                // Phase 3: Extract dates from S3 keys via regex
-                // Example: 'data/futures/um/daily/trades/BTCUSDT/BTCUSDT-trades-2019-09-08.zip' -> '2019-09-08'
-                let date_strings: Vec<String> = paths
-                    .iter()
-                    .filter_map(|x| {
-                        DATE_RE
-                            .captures(x)
-                            .and_then(|caps| caps.get(1))
-                            .map(|date_match| date_match.as_str().to_string())
-                    })
-                    .collect();
+                    // Phase 3: Extract dates from S3 keys via regex
+                    // Example: 'data/futures/um/daily/trades/BTCUSDT/BTCUSDT-trades-2019-09-08.zip' -> '2019-09-08'
+                    let date_strings: Vec<String> = paths
+                        .iter()
+                        .filter_map(|x| {
+                            DATE_RE
+                                .captures(x)
+                                .and_then(|caps| caps.get(1))
+                                .map(|date_match| date_match.as_str().to_string())
+                        })
+                        .collect();
 
-                Ok::<(String, Vec<String>), anyhow::Error>((symbol, date_strings))
+                    Ok::<(String, Vec<String>), anyhow::Error>((symbol, date_strings))
+                }).await;
+
+                match result {
+                    Ok(inner_result) => inner_result,
+                    Err(_) => {
+                        eprintln!("Warning: Timeout fetching dates for symbol {}. Skipping.", symbol_clone);
+                        Ok((symbol_clone, Vec::new()))
+                    }
+                }
             });
         }
 

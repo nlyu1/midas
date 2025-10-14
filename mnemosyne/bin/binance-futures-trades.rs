@@ -78,7 +78,7 @@ async fn main() -> Result<()> {
     let universe_df = tb.get_universe_df().await?;
     println!("Universe shape: {:?}", universe_df.shape());
     println!("\nUniverse head:");
-    println!("{}", universe_df.head(Some(10)));
+    println!("{}", universe_df.head(Some(5)));
 
     // Get symbol date for test query
     let test_date = NaiveDate::parse_from_str(&args.test_date, "%Y-%m-%d")
@@ -99,10 +99,10 @@ async fn main() -> Result<()> {
     println!("{}", collected.head(Some(5)));
 
     let hive_df = tb.hive_symbol_date_pairs(false).await?;
-    println!("\nOnhive\n{}", hive_df);
+    println!("\nOnhive\n{}", hive_df.head(Some(5)));
 
     let nohive_pairs = tb.nohive_symbol_date_pairs(false).await?;
-    println!("\nMissing\n{}", nohive_pairs);
+    println!("\nMissing\n{}", nohive_pairs.head(Some(5)));
 
     if !args.yes {
         println!("\nProceed with update? (press Enter)");

@@ -1,3 +1,7 @@
+[build-system]
+requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
+
 [project]
 name = "mnemosyne"
 requires-python = ">=3.12"
@@ -6,32 +10,22 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
 ]
 dynamic = ["version"]
+dependencies = [
+    "atlas",
+    "polars>=1.32.0",
+    "ipykernel>=6.30.0",
+    "graphviz>=0.21",
+    "joblib>=1.5.0",
+]
 
-[tool.poetry]
-package-mode = false
-
-[tool.poetry.dependencies]
-python = "^3.12"
-polars = {version = "1.32.3", extras = ["gpu"]}
-ipykernel = "^6.30.1"
-graphviz = "^0.21"
-joblib = "^1.5.2"
-maturin = {extras = ["patchelf"], version = "^1.9.6"}
-atlas = {path = "../atlas", develop = true}
-
-[tool.poetry.group.dev.dependencies]
-maturin = "^1.9.6"
-
-[build-system]
-requires = ["maturin>=1.9,<2.0"]
-build-backend = "maturin"
+[tool.uv.sources]
+atlas = { workspace = true }
 
 [tool.maturin]
 python-source = "python"
 features = ["pyo3/extension-module"]
 
-
-[[tool.poetry.source]]
-name = "nvidia"
-url = "https://pypi.nvidia.com"
-priority = "explicit"
+[dependency-groups]
+dev = [
+    "ipykernel>=7.0.0",
+]

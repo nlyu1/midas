@@ -1,3 +1,26 @@
+/// Crypto data collection framework with trait-based abstraction.
+///
+/// ## Architecture
+/// **`CryptoDataInterface` trait**: Separates implementation-specific logic (URLs, S3 queries, CSV parsing)
+/// from common functionality (caching, diff calculation, parallel updates).
+///
+/// ## Data Flow
+/// 1. **Universe Initialization**: Fetch (symbol, date) pairs from S3 → cache to `universe.parquet`
+/// 2. **Local Inventory**: Scan hive directory → validate parquets → cache to `hive_symbol_date_pairs.parquet`
+/// 3. **Diff Calculation**: Anti-join `universe - hive` → missing pairs
+/// 4. **Parallel Download**: Rayon workers with per-thread tokio runtimes → download + process → parquet
+///
+/// ## Caching Strategy
+/// - **Universe cache**: Avoid expensive S3 listing (recompute with `--recompute-universe`)
+/// - **Hive cache**: Incremental validation (only new files), recompute with `--recompute-onhive`
+/// - **Corrupted files**: Auto-deleted during validation to prevent bad data accumulation
+///
+/// ## Parallelism Pattern
+/// `update_universe` uses rayon + per-thread tokio runtimes:
+/// - Rayon: thread-level parallelism for download workers
+/// - Per-thread tokio: each worker spawns isolated runtime for async HTTP downloads
+/// - Necessary because rayon thread pool ≠ tokio thread pool
+
 pub mod binance;
 pub use binance::{BinanceSpotTradeBook, BinanceUmFuturesTradeBook};
 
@@ -11,13 +34,21 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use walkdir::WalkDir;
 
-/// Helper function to extract (symbol, date) from first row of a parquet file
-/// Returns None if file is corrupted (and deletes it)
-/// Path checking (ends_with "data.parquet") should be done by caller
+/// Convert Polars Date (i32 days since Unix epoch) to chrono::NaiveDate.
+/// Polars stores dates as days since 1970-01-01, chrono uses days since Common Era.
+/// Conversion: days_since_epoch + 719163 (offset from CE to Unix epoch)
+#[inline]
+fn polars_date_to_naive(days_since_epoch: i32) -> Option<NaiveDate> {
+    NaiveDate::from_num_days_from_ce_opt(days_since_epoch + 719163)
+}
+
+/// Extract (symbol, date) from first row of parquet file for validation.
+/// Validates both metadata AND data pages (catches more corruption than just metadata check).
+/// Returns None if corrupted → file is automatically deleted to prevent accumulation of bad data.
+/// Caller must pre-filter to "data.parquet" files only.
 fn extract_symbol_date_first_row(path: &Path) -> Option<LazyFrame> {
     let path_str = path.display().to_string();
-
-    // Helper to delete corrupted file and report
+    // Closure: delete corrupted file and log detailed error info
     let delete_and_report = |stage: &str, err: &dyn std::fmt::Display| {
         eprintln!("Corrupted parquet ({} failed): {}", stage, path_str);
         eprintln!("Error: {}", err);
@@ -27,8 +58,7 @@ fn extract_symbol_date_first_row(path: &Path) -> Option<LazyFrame> {
             eprintln!("Deleted: {}", path_str);
         }
     };
-
-    // Try to scan parquet (validates metadata)
+    // Phase 1: Validate parquet metadata (cheap: no data reading)
     let lf = match LazyFrame::scan_parquet(PlPath::new(&path_str), ScanArgsParquet::default()) {
         Ok(lf) => lf,
         Err(e) => {
@@ -36,9 +66,8 @@ fn extract_symbol_date_first_row(path: &Path) -> Option<LazyFrame> {
             return None;
         }
     };
-
-    // Try to read first row (validates data pages)
-    // Cast symbol to String to ensure consistent schema across all files
+    // Phase 2: Read first row to validate data pages (expensive but necessary)
+    // Cast symbol to String for schema consistency (some files may have Categorical/Utf8 variants)
     let df = match lf
         .select([
             col("symbol").cast(DataType::String).first().alias("symbol"),
@@ -53,9 +82,8 @@ fn extract_symbol_date_first_row(path: &Path) -> Option<LazyFrame> {
         }
     };
     println!(
-        "{:?}, verification successful. height {}",
+        "{:?}, parquet verification successful",
         &path,
-        df.height(),
     );
 
     Some(df.lazy())
@@ -269,10 +297,7 @@ pub trait CryptoDataInterface: Send + Sync + Sized + 'static {
                 if let (Some(symbol), Some(days_since_epoch)) =
                     (symbol_col.get(i), date_col.phys.get(i))
                 {
-                    // Polars Date is stored as days since Unix epoch (1970-01-01)
-                    if let Some(date) =
-                        NaiveDate::from_num_days_from_ce_opt(days_since_epoch + 719163)
-                    {
+                    if let Some(date) = polars_date_to_naive(days_since_epoch) {
                         let hive_path = self.build_hive_path(symbol, date);
                         set.insert(hive_path.to_string_lossy().to_string());
                     }
@@ -287,29 +312,30 @@ pub trait CryptoDataInterface: Send + Sync + Sized + 'static {
             (HashSet::new(), None)
         };
 
-        // Wrap in spawn_blocking to avoid nested runtime issues
+        // Wrap in spawn_blocking: filesystem I/O + CPU-bound validation
         let result = tokio::task::spawn_blocking(move || {
             println!("Scanning and validating parquet files in parallel...");
 
-            // Parallelize validation: only validate NEW files not in cache
+            // Incremental validation: only validate NEW files not in cache (optimization)
+            // Uses rayon's par_bridge for thread-level parallelism across filesystem walk
             let new_lazyframes: Vec<LazyFrame> = WalkDir::new(&hive_data_path)
                 .min_depth(1)
                 .into_iter()
-                .par_bridge()
+                .par_bridge() // Rayon parallelization over iterator
                 .filter_map(|entry_result| {
                     let entry = entry_result.ok()?;
                     let path = entry.path();
 
-                    // Filter: must end with data.parquet
+                    // Filter 1: only process parquet files
                     if !path.ends_with("data.parquet") {
                         return None;
                     }
                     let path_str = path.to_string_lossy().to_string();
-                    // Skip if already in cache
+                    // Filter 2: skip files already validated in cache
                     if known_paths.contains(&path_str) {
                         return None;
                     }
-                    // Expensive operation: download & unzip data for symbol date path
+                    // Expensive: validate parquet + extract metadata
                     extract_symbol_date_first_row(path)
                 })
                 .collect();
@@ -354,17 +380,18 @@ pub trait CryptoDataInterface: Send + Sync + Sized + 'static {
         Ok(result)
     }
 
-    /// Calculate missing (symbol, date) pairs (universe - on_disk)
+    /// Calculate missing (symbol, date) pairs: universe - on_disk (set difference via anti-join)
+    /// Returns DataFrame of pairs that exist in S3 but not locally → candidates for download
     async fn nohive_symbol_date_pairs(&self, recompute: bool) -> Result<DataFrame> {
         let universe_df = self.get_universe_df().await?;
         let hive_df = self.hive_symbol_date_pairs(recompute).await?;
 
-        // Perform anti-join in blocking task
+        // Anti-join is CPU-bound, run in blocking thread pool
         let result = tokio::task::spawn_blocking(move || {
             let universe_lf = universe_df.lazy().select(&[col("symbol"), col("date")]);
 
             if hive_df.height() == 0 {
-                // No files on disk yet, return full universe
+                // Edge case: no files on disk yet → all of universe is missing
                 return universe_lf
                     .collect()
                     .context("Failed to collect universe (no files on disk yet)");
@@ -372,7 +399,8 @@ pub trait CryptoDataInterface: Send + Sync + Sized + 'static {
 
             let hive_lf = hive_df.lazy();
 
-            // Anti-join: universe - hive = missing pairs
+            // Anti-join: keep rows from universe where (symbol, date) NOT in hive
+            // Equivalent to SQL: SELECT * FROM universe WHERE (symbol, date) NOT IN (SELECT symbol, date FROM hive)
             let missing_pairs_lf = universe_lf.join(
                 hive_lf,
                 [col("symbol"), col("date")],
@@ -476,10 +504,7 @@ pub trait CryptoDataInterface: Send + Sync + Sized + 'static {
             if let (Some(symbol), Some(days_since_epoch)) =
                 (symbol_col.get(i), date_col.phys.get(i))
             {
-                // Polars Date is stored as days since Unix epoch (1970-01-01)
-                // Convert to NaiveDate
-                if let Some(date) = NaiveDate::from_num_days_from_ce_opt(days_since_epoch + 719163)
-                {
+                if let Some(date) = polars_date_to_naive(days_since_epoch) {
                     pairs.push((symbol.to_string(), date));
                 }
             }
@@ -492,27 +517,31 @@ pub trait CryptoDataInterface: Send + Sync + Sized + 'static {
 
         println!("Found {} missing (symbol, date) pairs", pairs.len());
 
-        // Wrap parallel processing in spawn_blocking to avoid nested runtime issues
+        // Parallel download+process: spawn_blocking avoids nested runtime issues
         let self_clone = Arc::clone(&self);
         let results: Vec<(String, NaiveDate, String, Option<String>)> =
             tokio::task::spawn_blocking(move || {
-                // Process pairs in parallel using rayon + per-thread tokio runtimes
+                // Rayon parallelism: each worker thread gets its own tokio runtime
+                // This pattern is necessary because:
+                // 1. Rayon thread pool != tokio thread pool
+                // 2. Async download_raw() needs tokio runtime
+                // 3. Each rayon worker creates isolated runtime via Runtime::new()
                 pairs
                     .into_par_iter()
                     .map(|(symbol, date)| {
                         let self_clone = Arc::clone(&self_clone);
-                        let rt = tokio::runtime::Runtime::new().unwrap();
+                        let rt = tokio::runtime::Runtime::new().unwrap(); // Per-thread runtime
 
                         rt.block_on(async move {
                             let hive_path = self_clone.build_hive_path(&symbol, date);
 
-                            // Skip if already exists
+                            // Skip if already processed (race condition safety)
                             if hive_path.exists() {
                                 return (symbol, date, "skipped".to_string(), None);
                             }
                             println!("  {} {}: Processing...", symbol, date);
 
-                            // Pure side effect: ensure parquet exists, or find data on disk.
+                            // Download (async I/O) + process (sync CPU) → parquet file
                             match self_clone.ensure_data_ready(&symbol, date).await {
                                 Ok(_) => {
                                     println!("  {} {}: Done!", symbol, date);
@@ -567,6 +596,24 @@ pub trait CryptoDataInterface: Send + Sync + Sized + 'static {
             stats.failed,
             self.hive_symbol_date_cache_path().to_string_lossy()
         );
+
+        // Recompute missing pairs post-download to:
+        // 1. Rebuild cache with newly downloaded files
+        // 2. Show user what's ACTUALLY still missing (validation)
+        if stats.success > 0 || stats.skipped > 0 {
+            println!("\nRecomputing remaining missing pairs (rebuilding cache)...");
+            let remaining_missing = self.nohive_symbol_date_pairs(true).await?;
+            println!(
+                "   Remaining missing: {} symbol-date pairs",
+                remaining_missing.height()
+            );
+            if remaining_missing.height() > 0 && remaining_missing.height() <= 10 {
+                println!("{}", remaining_missing);
+            } else if remaining_missing.height() > 10 {
+                println!("{}", remaining_missing.head(Some(10)));
+                println!("   ... and {} more", remaining_missing.height() - 10);
+            }
+        }
 
         Ok(stats)
     }

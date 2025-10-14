@@ -280,6 +280,12 @@ uv enforces a single `requires-python` across the workspace:
 - Ensures compatibility
 - If atlas needs `>=3.12` and mnemosyne needs `>=3.12`, workspace requires `>=3.12`
 
+### Jupyter & VSCode 
+
+```bash
+uv add --dev ipykernel
+uv run ipython kernel install --user --name=midas --display=name "midas"
+```
 ---
 
 ## Advantages of uv Over Poetry
@@ -312,37 +318,6 @@ uv enforces a single `requires-python` across the workspace:
 - **uv**: Active development by Astral (also makes Ruff), modern architecture
 - **Poetry**: Established but not evolving toward workspace support
 
----
-
-## Potential Concerns & Mitigations
-
-### Concern 1: "uv is newer, less mature"
-
-**Reality**:
-- uv reached v0.1.0 in Feb 2024, v1.0 in 2024
-- Backed by Astral (Ruff developers), well-funded
-- Rapidly becoming industry standard
-- Already used by major projects
-
-**Mitigation**: uv's workspace support is stable and well-documented.
-
-### Concern 2: "What if we need Poetry-specific features?"
-
-**Reality**:
-- uv supports all PEP-621 features
-- Can publish to PyPI with `uv build` and `uv publish`
-- More features than you need for development
-
-**Mitigation**: Identify any specific Poetry features you use → likely have uv equivalents.
-
-### Concern 3: "Migration effort"
-
-**Reality**:
-- Poetry → uv migration is straightforward
-- Mostly just changing `[tool.poetry]` to `[project]` (standard format)
-- uv can read poetry.lock files
-
-**Mitigation**: Estimated 1-2 hours for entire workspace migration.
 
 ---
 
@@ -569,11 +544,3 @@ If you absolutely must use Poetry:
 **All requirements met. Zero compromises.**
 
 ---
-
-## Next Steps
-
-1. **Review this document** - any questions or concerns?
-2. **Approve migration** - confirm you want to proceed
-3. **Execute migration** - follow the migration path above
-4. **Update documentation** - record new workflows
-5. **Celebrate** - you now have the Python equivalent of Cargo workspaces!
