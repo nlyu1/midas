@@ -507,9 +507,11 @@ pl.scan_parquet(hive_data_path / "**/data.parquet", hive_partitioning=True).coll
 
 # %%
 import polars as pl
-from mnemosyne.constants import BINANCE_DATA_PATH
+import mnemosyne as ms
+from pathlib import Path
 
-path = BINANCE_DATA_PATH / "spot/last_trade/peg_symbol=USDT"
-pl.read_parquet(path / "hive_symbol_date_pairs.parquet").schema
+hive_path = Path(ms.DatasetType.BinanceSpotTrades.hive_path("USDC"))
+pl.read_parquet(hive_path / "hive_symbol_date_pairs.parquet")
+
 # %%
 list(path.glob("*.parquet"))

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::NaiveDate;
 use clap::{ArgAction, Parser};
-use mnemosyne::crypto::binance::BinanceDataInterface;
+use mnemosyne::crypto::CryptoDataInterface;
 use mnemosyne::crypto::binance::BinanceSpotTradeBook;
 use mnemosyne::datasets::DatasetType;
 use std::path::PathBuf;
