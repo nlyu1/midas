@@ -214,11 +214,9 @@ pub trait BinanceDataInterface: Send + Sync + Sized + 'static {
     }
 
     /// Get (symbol, date) pairs that exist on disk (with caching)
-    async fn hive_symbol_date_pairs(
-        &self,
-        recompute: bool,
-    ) -> Result<DataFrame> {
+    async fn hive_symbol_date_pairs(&self, recompute: bool) -> Result<DataFrame> {
         let cache_path = self.hive_symbol_date_cache_path();
+        println!("Trying to observe cache from: {:?}", cache_path);
 
         // Recompute if requested or cache doesn't exist
         if recompute || !cache_path.exists() {
@@ -239,6 +237,10 @@ pub trait BinanceDataInterface: Send + Sync + Sized + 'static {
             } else {
                 None
             };
+            println!(
+                "Observed {} cached pairs",
+                cached_pairs.clone().map(|d| d.height()).unwrap_or(0)
+            );
 
             let hive_df = self.compute_hive_symbol_date_pairs(cached_pairs).await?;
 
@@ -301,7 +303,10 @@ pub trait BinanceDataInterface: Send + Sync + Sized + 'static {
                 }
             }
             // Normalize schema: only select symbol and date columns to match new data
-            (set, Some(cached.clone().lazy().select([col("symbol"), col("date")])))
+            (
+                set,
+                Some(cached.clone().lazy().select([col("symbol"), col("date")])),
+            )
         } else {
             (HashSet::new(), None)
         };
@@ -374,14 +379,9 @@ pub trait BinanceDataInterface: Send + Sync + Sized + 'static {
     }
 
     /// Calculate missing (symbol, date) pairs (universe - on_disk)
-    async fn nohive_symbol_date_pairs(
-        &self,
-        recompute: bool,
-    ) -> Result<DataFrame> {
+    async fn nohive_symbol_date_pairs(&self, recompute: bool) -> Result<DataFrame> {
         let universe_df = self.get_universe_df().await?;
-        let hive_df = self
-            .hive_symbol_date_pairs(recompute)
-            .await?;
+        let hive_df = self.hive_symbol_date_pairs(recompute).await?;
 
         // Perform anti-join in blocking task
         let result = tokio::task::spawn_blocking(move || {
@@ -518,39 +518,40 @@ pub trait BinanceDataInterface: Send + Sync + Sized + 'static {
 
         // Wrap parallel processing in spawn_blocking to avoid nested runtime issues
         let self_clone = Arc::clone(&self);
-        let results: Vec<(String, NaiveDate, String, Option<String>)> = tokio::task::spawn_blocking(move || {
-            // Process pairs in parallel using rayon + per-thread tokio runtimes
-            pairs
-                .into_par_iter()
-                .map(|(symbol, date)| {
-                    let self_clone = Arc::clone(&self_clone);
-                    let rt = tokio::runtime::Runtime::new().unwrap();
+        let results: Vec<(String, NaiveDate, String, Option<String>)> =
+            tokio::task::spawn_blocking(move || {
+                // Process pairs in parallel using rayon + per-thread tokio runtimes
+                pairs
+                    .into_par_iter()
+                    .map(|(symbol, date)| {
+                        let self_clone = Arc::clone(&self_clone);
+                        let rt = tokio::runtime::Runtime::new().unwrap();
 
-                    rt.block_on(async move {
-                        let hive_path = self_clone.build_hive_path(&symbol, date);
+                        rt.block_on(async move {
+                            let hive_path = self_clone.build_hive_path(&symbol, date);
 
-                        // Skip if already exists
-                        if hive_path.exists() {
-                            return (symbol, date, "skipped".to_string(), None);
-                        }
-                        println!("  {} {}: Processing...", symbol, date);
-
-                        // Pure side effect: ensure parquet exists, or find data on disk.
-                        match self_clone.ensure_data_ready(&symbol, date).await {
-                            Ok(_) => {
-                                println!("  {} {}: Done!", symbol, date);
-                                (symbol, date, "success".to_string(), None)
+                            // Skip if already exists
+                            if hive_path.exists() {
+                                return (symbol, date, "skipped".to_string(), None);
                             }
-                            Err(e) => {
-                                eprintln!("  {} {}: Failed - {}", symbol, date, e);
-                                (symbol, date, "error".to_string(), Some(e.to_string()))
+                            println!("  {} {}: Processing...", symbol, date);
+
+                            // Pure side effect: ensure parquet exists, or find data on disk.
+                            match self_clone.ensure_data_ready(&symbol, date).await {
+                                Ok(_) => {
+                                    println!("  {} {}: Done!", symbol, date);
+                                    (symbol, date, "success".to_string(), None)
+                                }
+                                Err(e) => {
+                                    eprintln!("  {} {}: Failed - {}", symbol, date, e);
+                                    (symbol, date, "error".to_string(), Some(e.to_string()))
+                                }
                             }
-                        }
+                        })
                     })
-                })
-                .collect()
-        })
-        .await?;
+                    .collect()
+            })
+            .await?;
 
         // Compute summary statistics
         let stats = UpdateStats {

@@ -1,10 +1,6 @@
-import shutil
+from ..utils import printv
 from pathlib import Path
-
-
-def printv(content: str, verbose=True):
-    if verbose:
-        print(content)
+import shutil
 
 
 def verify_directory(
