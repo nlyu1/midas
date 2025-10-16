@@ -1,6 +1,46 @@
 from typing import Tuple, List
 
 
+def assert_not_incompatible(pattern_a: str, pattern_b: str) -> None:
+    """Check if two einops patterns have conflicting named axes.
+
+    When neither has ellipsis: lengths must match, positions must match (or wildcard).
+    When either has ellipsis: compare overlapping prefix/suffix tokens.
+    Wildcards ('()', '*', '...') match anything.
+
+    Args:
+        pattern_a: First einops pattern
+        pattern_b: Second einops pattern
+
+    Raises:
+        ValueError: If patterns have conflicting structure
+    """
+    wildcards = {'()', '*', '...'}
+    has_ellipsis_a = '...' in pattern_a
+    has_ellipsis_b = '...' in pattern_b
+
+    if not has_ellipsis_a and not has_ellipsis_b:
+        tokens_a, tokens_b = pattern_a.split(), pattern_b.split()
+        if len(tokens_a) != len(tokens_b):
+            raise ValueError(f"{pattern_a} is not compatible with {pattern_b}")
+        for ta, tb in zip(tokens_a, tokens_b):
+            if ta != tb and ta not in wildcards and tb not in wildcards:
+                raise ValueError(f"{pattern_a} is not compatible with {pattern_b}")
+    else:
+        parts_a, parts_b = pattern_a.split('...'), pattern_b.split('...')
+        left_a, left_b = parts_a[0].split(), parts_b[0].split()
+        right_a = parts_a[1].split() if len(parts_a) > 1 else []
+        right_b = parts_b[1].split() if len(parts_b) > 1 else []
+        for i in range(min(len(left_a), len(left_b))):
+            ta, tb = left_a[i], left_b[i]
+            if ta != tb and ta not in wildcards and tb not in wildcards:
+                raise ValueError(f"{pattern_a} is not compatible with {pattern_b}")
+        for i in range(min(len(right_a), len(right_b))):
+            ta, tb = right_a[-(i+1)], right_b[-(i+1)]
+            if ta != tb and ta not in wildcards and tb not in wildcards:
+                raise ValueError(f"{pattern_a} is not compatible with {pattern_b}")
+
+
 def parse_einops_axes(input_shape: str, output_shape: str) -> Tuple[List[str], List[str]]:
     """Extract kept and reduced axes from input/output shape pairs.
 

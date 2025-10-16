@@ -11,8 +11,10 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
+    "dash>=3.2.0",
     "einops>=0.8.1",
     "matplotlib>=3.10.7",
+    "pandas>=2.3.3",
     "polars[gpu]>=1.32.3",
     "torch>=2.8.0",
 ]

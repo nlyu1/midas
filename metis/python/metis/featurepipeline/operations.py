@@ -11,7 +11,13 @@ from functools import cached_property
 
 class ConjShapePair:
     """Rearrange tensor to conjugated shape, apply operation, rearrange back."""
-    def __init__(self, input_shape: str, conj_shape: str, assert_conj_dim: Union[int, None] = None):
+
+    def __init__(
+        self,
+        input_shape: str,
+        conj_shape: str,
+        assert_conj_dim: Union[int, None] = None,
+    ):
         self.input_shape = input_shape
         self.conj_shape = conj_shape
         self.assert_conj_dim = assert_conj_dim
@@ -20,25 +26,38 @@ class ConjShapePair:
         self.input_shape_dict = parse_shape(x, self.input_shape)
         conj = rearrange(x, f"{self.input_shape} -> {self.conj_shape}")
         if self.assert_conj_dim is not None and conj.dim() != self.assert_conj_dim:
-            raise RuntimeError(f"Expected {self.assert_conj_dim} dims, got {conj.dim()}")
+            raise RuntimeError(
+                f"Expected {self.assert_conj_dim} dims, got {conj.dim()}"
+            )
         return conj
 
     def from_conj(self, conj: torch.Tensor) -> torch.Tensor:
-        return rearrange(conj, f"{self.conj_shape} -> {self.input_shape}", **self.input_shape_dict)
+        return rearrange(
+            conj, f"{self.conj_shape} -> {self.input_shape}", **self.input_shape_dict
+        )
 
-    def conj_apply(self, x: torch.Tensor, fn: Callable[[torch.Tensor], torch.Tensor]) -> torch.Tensor:
+    def conj_apply(
+        self, x: torch.Tensor, fn: Callable[[torch.Tensor], torch.Tensor]
+    ) -> torch.Tensor:
         input_shape_dict = parse_shape(x, self.input_shape)
         conj = rearrange(x, f"{self.input_shape} -> {self.conj_shape}")
         if self.assert_conj_dim is not None and conj.dim() != self.assert_conj_dim:
-            raise RuntimeError(f"Expected {self.assert_conj_dim} dims, got {conj.dim()}")
+            raise RuntimeError(
+                f"Expected {self.assert_conj_dim} dims, got {conj.dim()}"
+            )
         result = fn(conj)
-        return rearrange(result, f"{self.conj_shape} -> {self.input_shape}", **input_shape_dict)
+        return rearrange(
+            result, f"{self.conj_shape} -> {self.input_shape}", **input_shape_dict
+        )
 
 
 class FeatureOperation(nn.Module, ABC):
     """Base class for stateful feature transformations."""
+
     def __init__(self, input_shape: str = "batch feature"):
         super().__init__()
+        if "..." in input_shape:
+            raise ValueError(f"input_shape must be fully specified, got: {input_shape}")
         self.is_fitted: bool = False
         self.input_shape = input_shape
 
@@ -80,8 +99,10 @@ class FeatureOperation(nn.Module, ABC):
         self.is_fitted = True
         return self
 
+
 class Identity(FeatureOperation):
     """No-op pass-through operation."""
+
     def _fit(self, x: torch.Tensor) -> None:
         pass
 
@@ -91,7 +112,13 @@ class Identity(FeatureOperation):
 
 class FillNans(FeatureOperation):
     """Fill NaN values with median or constant."""
-    def __init__(self, fill_value: Union[float, Literal["median"]] = "median", reduce_shape="() feature", **kwargs):
+
+    def __init__(
+        self,
+        fill_value: Union[float, Literal["median"]] = "median",
+        reduce_shape="() feature",
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         if not (fill_value == "median" or isinstance(fill_value, (int, float))):
             raise ValueError("`fill_value` must be 'median' or a number.")
@@ -101,7 +128,9 @@ class FillNans(FeatureOperation):
 
     def _fit(self, x: torch.Tensor) -> None:
         if self.fill_value == "median":
-            median_fn = multidim_reduce_keepdim(torch.nanmedian, self.input_shape, self.reduce_shape)
+            median_fn = multidim_reduce_keepdim(
+                torch.nanmedian, self.input_shape, self.reduce_shape
+            )
             median_val = median_fn(x)
             if torch.isnan(median_val).any():
                 raise RuntimeError("Input contains only NaN values")
@@ -115,9 +144,16 @@ class FillNans(FeatureOperation):
 
 class Std(FeatureOperation):
     """Standardize by subtracting mean and dividing by std."""
-    def __init__(self, normalize_shape: str = "() feature", mean: Union[float, None] = None,
-                 std: Union[float, None] = None, ignore_nan_during_fit: bool = True,
-                 min_eps: float = 1e-5, **kwargs):
+
+    def __init__(
+        self,
+        normalize_shape: str = "() feature",
+        mean: Union[float, None] = None,
+        std: Union[float, None] = None,
+        ignore_nan_during_fit: bool = True,
+        min_eps: float = 1e-5,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.normalize_shape = normalize_shape
         self.mean = mean
@@ -131,17 +167,23 @@ class Std(FeatureOperation):
         if self.mean is not None:
             mean_tensor = torch.tensor(self.mean).type_as(x)
         else:
-            mean_fn = multidim_reduce_keepdim(torch.nanmean, self.input_shape, self.normalize_shape)
+            mean_fn = multidim_reduce_keepdim(
+                torch.nanmean, self.input_shape, self.normalize_shape
+            )
             mean_tensor = mean_fn(x)
         if self.std is not None:
             std_tensor = torch.tensor(self.std).type_as(x)
         else:
-            std_fn = multidim_reduce_keepdim(nanstd, self.input_shape, self.normalize_shape)
+            std_fn = multidim_reduce_keepdim(
+                nanstd, self.input_shape, self.normalize_shape
+            )
             std_tensor = std_fn(x)
         self.register_buffer("mean_tensor", mean_tensor)
         self.register_buffer("std_tensor", std_tensor)
         if self.std_tensor.abs().min() < self.min_eps:
-            raise RuntimeError(f"Min std too small: {self.std_tensor.abs().min().item()}")
+            raise RuntimeError(
+                f"Min std too small: {self.std_tensor.abs().min().item()}"
+            )
 
     def _forward(self, x: torch.Tensor) -> torch.Tensor:
         return (x - self.mean_tensor) / self.std_tensor
@@ -149,7 +191,13 @@ class Std(FeatureOperation):
 
 class Clip(FeatureOperation):
     """Clip values to [min, max] range."""
-    def __init__(self, min_value: Union[float, None] = None, max_value: Union[float, None] = None, **kwargs):
+
+    def __init__(
+        self,
+        min_value: Union[float, None] = None,
+        max_value: Union[float, None] = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         if min_value is None and max_value is None:
             raise ValueError("At least one of min_value or max_value required")
@@ -165,8 +213,15 @@ class Clip(FeatureOperation):
 
 class ClipQuantiles(FeatureOperation):
     """Clip values based on learned quantiles."""
-    def __init__(self, normalize_shape: str = "() feature", min_quantile: Union[float, None] = None,
-                 max_quantile: Union[float, None] = None, ignore_nans_during_fit: bool = True, **kwargs):
+
+    def __init__(
+        self,
+        normalize_shape: str = "() feature",
+        min_quantile: Union[float, None] = None,
+        max_quantile: Union[float, None] = None,
+        ignore_nans_during_fit: bool = True,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         if min_quantile is None and max_quantile is None:
             raise ValueError("At least one of min_quantile or max_quantile required")
@@ -174,7 +229,11 @@ class ClipQuantiles(FeatureOperation):
             raise ValueError("min_quantile must be in [0, 1]")
         if max_quantile is not None and not (0 <= max_quantile <= 1):
             raise ValueError("max_quantile must be in [0, 1]")
-        if min_quantile is not None and max_quantile is not None and min_quantile >= max_quantile:
+        if (
+            min_quantile is not None
+            and max_quantile is not None
+            and min_quantile >= max_quantile
+        ):
             raise ValueError("min_quantile must be < max_quantile")
         self.normalize_shape = normalize_shape
         self.min_quantile = min_quantile
@@ -186,13 +245,21 @@ class ClipQuantiles(FeatureOperation):
             raise RuntimeError("ignore_nans_during_fit=False but encountered NaN")
         if self.min_quantile is not None:
             min_fn = multidim_reduce_keepdim(
-                lambda t, dim, keepdim: torch.nanquantile(t, self.min_quantile, dim=dim, keepdim=keepdim),
-                self.input_shape, self.normalize_shape)
+                lambda t, dim, keepdim: torch.nanquantile(
+                    t, self.min_quantile, dim=dim, keepdim=keepdim
+                ),
+                self.input_shape,
+                self.normalize_shape,
+            )
             self.register_buffer("min_tensor", min_fn(x))
         if self.max_quantile is not None:
             max_fn = multidim_reduce_keepdim(
-                lambda t, dim, keepdim: torch.nanquantile(t, self.max_quantile, dim=dim, keepdim=keepdim),
-                self.input_shape, self.normalize_shape)
+                lambda t, dim, keepdim: torch.nanquantile(
+                    t, self.max_quantile, dim=dim, keepdim=keepdim
+                ),
+                self.input_shape,
+                self.normalize_shape,
+            )
             self.register_buffer("max_tensor", max_fn(x))
 
     def _forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -203,6 +270,7 @@ class ClipQuantiles(FeatureOperation):
 
 class ElementwiseOp(FeatureOperation):
     """Apply arbitrary element-wise function."""
+
     def __init__(self, fn: Callable[[torch.Tensor], torch.Tensor], **kwargs):
         super().__init__(**kwargs)
         self.fn = fn
@@ -216,6 +284,7 @@ class ElementwiseOp(FeatureOperation):
 
 class Log(FeatureOperation):
     """Apply log(x + epsilon)."""
+
     def __init__(self, epsilon: float = 1e-8, **kwargs):
         super().__init__(**kwargs)
         self.epsilon = epsilon
@@ -229,6 +298,7 @@ class Log(FeatureOperation):
 
 class NonfiniteRaise(FeatureOperation):
     """Validation: raise on NaN/Inf values."""
+
     def __init__(self, on_nans: bool = True, on_inf: bool = True, **kwargs):
         super().__init__(**kwargs)
         if not on_nans and not on_inf:
@@ -255,9 +325,18 @@ class NonfiniteRaise(FeatureOperation):
 
 class ToQuantile(FeatureOperation):
     """Transform to quantile space (uniform [0,1] or Gaussian). Uses vectorized binary search."""
-    def __init__(self, normalize_shape: str = "() feature", method: Literal["uniform", "gaussian"] = "uniform",
-                 n_quantiles: int = 1000, ignore_nans_during_fit: bool = True, output_clip: bool = True,
-                 subsample: Union[int, None] = None, input_shape: str = "batch feature", **kwargs):
+
+    def __init__(
+        self,
+        normalize_shape: str = "() feature",
+        method: Literal["uniform", "gaussian"] = "uniform",
+        n_quantiles: int = 1000,
+        ignore_nans_during_fit: bool = True,
+        output_clip: bool = True,
+        subsample: Union[int, None] = None,
+        input_shape: str = "batch feature",
+        **kwargs,
+    ):
         super().__init__(input_shape=input_shape, **kwargs)
         if method not in ["uniform", "gaussian"]:
             raise ValueError("method must be 'uniform' or 'gaussian'")
@@ -275,9 +354,11 @@ class ToQuantile(FeatureOperation):
             raise RuntimeError("ignore_nans_during_fit=False but encountered NaN")
         _, n_samples = x_rearranged.shape
         if self.subsample is not None and n_samples > self.subsample:
-            indices = torch.randperm(n_samples, device=x.device)[:self.subsample]
+            indices = torch.randperm(n_samples, device=x.device)[: self.subsample]
             x_rearranged = x_rearranged[:, indices]
-        q_positions = torch.linspace(0, 1, self.n_quantiles, device=x.device, dtype=x.dtype)
+        q_positions = torch.linspace(
+            0, 1, self.n_quantiles, device=x.device, dtype=x.dtype
+        )
         quantiles = torch.nanquantile(x_rearranged, q_positions, dim=1).T
         self.register_buffer("quantiles", quantiles)
         self.register_buffer("q_positions", q_positions)
@@ -287,7 +368,11 @@ class ToQuantile(FeatureOperation):
             # Vectorized binary search + linear interpolation
             indices = torch.searchsorted(self.quantiles, y, right=False)
             indices = torch.clamp(indices, 1, self.n_quantiles - 1)
-            feat_idx = torch.arange(y.shape[0], device=y.device).unsqueeze(1).expand_as(indices)
+            feat_idx = (
+                torch.arange(y.shape[0], device=y.device)
+                .unsqueeze(1)
+                .expand_as(indices)
+            )
             q_lo = self.quantiles[feat_idx, indices - 1]
             q_hi = self.quantiles[feat_idx, indices]
             pos_lo = self.q_positions[indices - 1]
@@ -307,4 +392,5 @@ class ToQuantile(FeatureOperation):
                 if self.output_clip:
                     result = torch.clamp(result, -8.0, 8.0)
             return result
+
         return self.cspair.conj_apply(x, transform_fn)
