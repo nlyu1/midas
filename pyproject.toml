@@ -8,6 +8,7 @@ dev-dependencies = [
     "ruff>=0.3.0",
     "maturin>=1.9",
     "ipykernel>=6.30.0",
+    "uv>=0.9.2",
 ]
 
 [tool.uv.sources]

@@ -8,8 +8,19 @@ requires-python = ">=3.12"
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dynamic = ["version"]
+dependencies = [
+    "einops>=0.8.1",
+    "matplotlib>=3.10.7",
+    "polars[gpu]>=1.32.3",
+    "torch>=2.8.0",
+]
+
 [tool.maturin]
+python-source = "python"
 features = ["pyo3/extension-module"]
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu129"
