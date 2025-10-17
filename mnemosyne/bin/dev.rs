@@ -9,7 +9,6 @@
 /// - Example: s3://data.binance.vision/data/spot/daily/trades/BTCUSDT/
 use anyhow::Result;
 use aws_sdk_s3::Client;
-use regex::Regex;
 use std::collections::HashSet;
 
 const BUCKET: &str = "data.binance.vision";

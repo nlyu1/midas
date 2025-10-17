@@ -260,12 +260,12 @@ impl<S: BinanceCsvSchema> BinanceTradeBook<S> {
         latest_date: Option<NaiveDate>,
     ) -> Result<Self> {
         // Validate peg_symbol
-        if peg_symbol != "USDT" && peg_symbol != "USDC" {
-            anyhow::bail!(
-                "Invalid peg_symbol '{}'. Must be either 'USDT' or 'USDC'",
-                peg_symbol
-            );
-        }
+        // if peg_symbol != "USDT" && peg_symbol != "USDC" {
+        //     anyhow::bail!(
+        //         "Invalid peg_symbol '{}'. Must be either 'USDT' or 'USDC'",
+        //         peg_symbol
+        //     );
+        // }
 
         // Create directories if they don't exist
         fs::create_dir_all(&raw_data_path)?;
@@ -412,7 +412,7 @@ impl<S: BinanceCsvSchema> CryptoDataInterface for BinanceTradeBook<S> {
                     }
                 }
             })
-            .buffer_unordered(32) // Limit concurrent requests (prevents connection exhaustion)
+            .buffer_unordered(128) // Limit concurrent requests (prevents connection exhaustion)
             .collect()
             .await;
 

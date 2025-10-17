@@ -20,7 +20,7 @@ pub enum DatasetType {
 #[pymethods]
 impl DatasetType {
     pub fn hive_path(&self, peg_symbol: &str) -> String {
-        assert!((peg_symbol == "USDT") || (peg_symbol == "USDC"));
+        // assert!((peg_symbol == "USDT") || (peg_symbol == "USDC"));
         match self {
             Self::BinanceSpotTrades => format!(
                 "{}/lossless/spot/last_trade/peg_symbol={}",
@@ -38,7 +38,7 @@ impl DatasetType {
     }
 
     pub fn raw_data_path(&self, peg_symbol: &str) -> String {
-        assert!((peg_symbol == "USDT") || (peg_symbol == "USDC"));
+        // assert!((peg_symbol == "USDT") || (peg_symbol == "USDC"));
         match self {
             Self::BinanceSpotTrades => format!(
                 "{}/raw/spot/last_trade/peg_symbol={}",

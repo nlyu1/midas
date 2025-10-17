@@ -102,7 +102,7 @@ async fn main() -> Result<()> {
     println!("\nOnhive\n{}", hive_df.head(Some(5)));
 
     let nohive_pairs = tb.nohive_symbol_date_pairs(false).await?;
-    println!("\nMissing\n{}", nohive_pairs.head(Some(5)));
+    println!("\nMissing\n{}", nohive_pairs);
 
     if !args.yes {
         println!("\nProceed with update? (press Enter)");

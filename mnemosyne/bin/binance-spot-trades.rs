@@ -80,25 +80,25 @@ async fn main() -> Result<()> {
     println!("{}", universe_df.head(Some(5)));
 
     // Get symbol date for test query
-    let test_date = NaiveDate::parse_from_str(&args.test_date, "%Y-%m-%d")
-        .expect("Invalid test_date format. Use YYYY-MM-DD");
-    let df = tb
-        .clone()
-        .symbol_date_df(&args.test_symbol, test_date)
-        .await?;
+    // let test_date = NaiveDate::parse_from_str(&args.test_date, "%Y-%m-%d")
+    //     .expect("Invalid test_date format. Use YYYY-MM-DD");
+    // let df = tb
+    //     .clone()
+    //     .symbol_date_df(&args.test_symbol, test_date)
+    //     .await?;
 
-    // Wrap .collect() in spawn_blocking
-    let collected = tokio::task::spawn_blocking(move || df.collect()).await??;
-    println!(
-        "\n{} {} shape: {:?}",
-        args.test_symbol,
-        args.test_date,
-        collected.shape()
-    );
-    println!("{}", collected.head(Some(5)));
+    // // Wrap .collect() in spawn_blocking
+    // let collected = tokio::task::spawn_blocking(move || df.collect()).await??;
+    // println!(
+    //     "\n{} {} shape: {:?}",
+    //     args.test_symbol,
+    //     args.test_date,
+    //     collected.shape()
+    // );
+    // println!("{}", collected.head(Some(5)));
 
-    let hive_df = tb.hive_symbol_date_pairs(false).await?;
-    println!("\nOnhive\n{}", hive_df);
+    // let hive_df = tb.hive_symbol_date_pairs(false).await?;
+    // println!("\nOnhive\n{}", hive_df);
 
     let nohive_pairs = tb.nohive_symbol_date_pairs(false).await?;
     println!("\nMissing\n{}", nohive_pairs);
