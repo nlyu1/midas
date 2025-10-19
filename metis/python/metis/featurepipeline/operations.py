@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 from abc import ABC, abstractmethod
 import math
-from ..utils.torchops import *
+from ..utils.torchops import multidim_reduce_keepdim
 from ..utils.indexing import build_conj_shape
-from einops import parse_shape, rearrange, reduce
+from einops import parse_shape, rearrange
 from typing import Literal, Union, Any, Callable
 from functools import cached_property
 

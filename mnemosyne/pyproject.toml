@@ -12,11 +12,13 @@ classifiers = [
 dynamic = ["version"]
 dependencies = [
     "atlas",
-    "polars>=1.32.0",
+    "polars[gpu]>=1.32.0",
     "ipykernel>=6.30.0",
     "graphviz>=0.21",
     "joblib>=1.5.0",
     "numpy>=2.3.3",
+    "ipywidgets>=8.1.7",
+    "dill>=0.4.0",
 ]
 
 [tool.uv.sources]
