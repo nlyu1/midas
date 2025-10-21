@@ -16,7 +16,9 @@ dependencies = [
     "matplotlib>=3.10.7",
     "pandas>=2.3.3",
     "polars[gpu]>=1.32.3",
+    "scikit-learn>=1.7.2",
     "torch>=2.8.0",
+    "xgboost>=3.1.0",
 ]
 
 [tool.maturin]

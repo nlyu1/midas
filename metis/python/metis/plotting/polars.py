@@ -1,13 +1,11 @@
 import polars as pl
 from typing import Dict, List, Optional
 import plotly.graph_objects as go
-from .array import hist_tensor
+# from .array import hist_tensor
+
 
 def hist_df(
-    df: pl.DataFrame,
-    columns: Optional[List[str]] = None,
-    bins: int = 50,
-    **kwargs
+    df: pl.DataFrame, columns: Optional[List[str]] = None, bins: int = 50, **kwargs
 ) -> Dict[str, go.Figure]:
     """Create histogram for each column in polars dataframe.
 

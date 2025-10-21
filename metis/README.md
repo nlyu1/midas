@@ -197,3 +197,38 @@ uv run ruff format template/
 ## License
 
 Part of the Midas workspace.
+
+
+# Specification
+
+I need a powerful, high-performance interactive web-based parquet dataset explorer, I plan to name it Atlas. 
+It's primay inputs are:
+
+1. Path to a parquet on the filesystem. 
+2. group_by_col: str
+3. weight_col: str
+4. cumsum_cols: List[str]
+5. feature_cols: List[str]
+6. categorical_cols: List[str]
+
+Let's define a cumsum plot(x_col, weight_col, cumsum_cols) as the following:
+- Sort (x, weight, cumsum_cols) by x
+- Put the x-col on the x-axis, notably "warped" by weight, so that x-rows with larger weight_col get larger share of the x-axis
+- Plot the cumsum cols. 
+
+Our atlas engine then makes one cumsum_plot for each feature_col\in feature_cols. 
+- Plotting should ideally be parallel, as I'll be working with huge datasets. 
+- Final result should be aggregated into one single webpage. 
+- For categorical values, just display vertical bar plots. 
+
+Additionally, I want some more custom functionalities: 
+
+1. At the top of the whole plot, I can do a filter of which cumsum_cols to plot. This can be ticked / specified by regex. Can also be cleared. 
+2. On top of **each** plot (feature), I can specify a filter of its value ranges. Applying this change will **recompute** the whole plot, equivalently as of on the sub-dataframe where x-values are subsampled. Note that these range filters should be chain-able with each other
+3. Similarly, for each categorical subplot, I can specify regex-match / tick match which filters for categorical values. 
+
+# Some more info:
+
+1. I'll be working with dataframe with millions of rows. Ideally I don't want subsampling, so that things should be very fast. Polars is my dataframe engine of choice here, hands down. 
+2. I'm extremely proficient in Rust & PyO3 bindings, but I'm not very familiar with web-development. I've heard that a friend did something like this in WebAssembly. 
+3. Consider the whole specification and think carefully about potential architecture / tech stack designs. Ultrathink. You will need to convince me about how the whole workflow works, and how **each** of my specifications & features can be achieved by the tech stack. If you're going into webassembly, you should elaborate on more details there, including build, dev, & use workflow on the behavioral & systems level. 

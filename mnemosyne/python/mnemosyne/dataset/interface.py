@@ -21,6 +21,7 @@ class ByDateDataview(ABC):
     _valid_partitions: Set[Date] = field(default_factory=set, init=False, repr=False)
     _validation_file: Path = field(init=False, repr=False)
     _parallel_map: ParallelMap = field(init=False, repr=False)
+    _symbol_enum: pl.Enum = field(init=False, repr=False)
 
     def __post_init__(self):
         """Initialize paths, parallel executor, and load cached validations."""
@@ -30,11 +31,13 @@ class ByDateDataview(ABC):
         universe_df = self.universe()
         universe_schema = universe_df.schema
         if not (
-            'date' in universe_schema and 
+            'date' in universe_schema and
             'symbol' in universe_schema
         ):
             raise RuntimeError(f'Dataview expects symbol, date columns. Schema: {universe_schema}')
         self.partitions = sorted(universe_df['date'].unique().to_list())
+        # Create symbol enum from universe for efficient categorical operations
+        self._symbol_enum = pl.Enum(universe_df['symbol'].unique().sort())
         cached = self._load_validation_cache()
         if cached:
             self.update_validations(new_partitions=list(cached), outdated_partitions=[], memory=True, file=False)
@@ -66,14 +69,19 @@ class ByDateDataview(ABC):
             logger.error(f"Could not save validation cache: {e}")
             return False
 
-    @abstractmethod
     def _valid_partition(self, date: Date) -> bool:
         """
-        Validate a single partition. Must be implemented by subclass.
-        Should check directory exists, parquet files readable, schema consistency, etc.
-        Raises on errors, returns bool on success.
+        Validate a single partition by attempting to read from it.
+        Checks if partition exists and parquet files are readable.
+        Override for custom validation logic (e.g., schema validation, row count checks).
         """
-        raise NotImplementedError('_valid_partition not implemented')
+        partition_path = self.path / f'date={date}/{self.parquet_names}'
+        try:
+            pl.scan_parquet(partition_path).head(1).collect()
+            return True
+        except Exception as e:
+            logger.debug(f'Date {date} validation failed: {e}')
+            return False
 
     def _check_partitions_batch(self, dates: List[Date]) -> Dict[Date, bool]:
         """Validate multiple partitions in parallel using process pool. Returns dict mapping date to validity."""
@@ -100,14 +108,16 @@ class ByDateDataview(ABC):
         """Return kwargs needed to reconstruct instance in worker process. Override and aggregate with super()."""
         return {}
 
-    @abstractmethod 
     def _postprocess_lf(self, lf) -> pl.LazyFrame:
         """
-        Common postprocessing steps. Specified by child. 
-        This operation should be **idempotent**, as it is performed both during sinking & later. 
-        Common operation is to cast symbol column to enum
+        Common postprocessing steps. Cast symbol column to enum for categorical efficiency if present.
+        This operation is **idempotent**, as it is performed both during sinking & later.
+        Subclasses can override to add additional processing while calling super()._postprocess_lf(lf).
         """
-        pass 
+        schema = lf.collect_schema()
+        if 'symbol' in schema:
+            return lf.with_columns(pl.col('symbol').cast(self._symbol_enum))
+        return lf 
 
     @abstractmethod
     def universe(self) -> pl.DataFrame:
@@ -235,7 +245,7 @@ class ByDateDataview(ABC):
 def _validate_partition_worker(date: Date, path: Path, parquet_names: str, validator_class: type, validator_kwargs: Dict) -> bool:
     """Worker function for parallel validation in separate process. Recreates validator and calls _valid_partition."""
     try:
-        validator = validator_class(partitions=[date], path=path, parquet_names=parquet_names, **validator_kwargs)
+        validator = validator_class(path=path, parquet_names=parquet_names, **validator_kwargs)
         return validator._valid_partition(date)
     except Exception as e:
         logger.error(f"Worker validation failed for {date}: {e}")
@@ -244,7 +254,10 @@ def _validate_partition_worker(date: Date, path: Path, parquet_names: str, valid
 
 @dataclass(kw_only=True)
 class ByDateDataset(ByDateDataview):
-    """Dataset with computation capabilities. Computed partitions are automatically validated and cached."""
+    """
+    Dataset with computation capabilities. Computed partitions are automatically validated and cached.
+    Inherits default _valid_partition implementation from ByDateDataview (attempts to read parquet files).
+    """
 
     @abstractmethod
     def _compute_partitions(self, dates: List[Date]) -> pl.LazyFrame:
@@ -254,13 +267,6 @@ class ByDateDataset(ByDateDataview):
         Raises on error.
         """
         pass
-
-    def _valid_partition(self, date: Date) -> bool:
-        """Check if partition directory exists with parquet files. Override for custom validation."""
-        partition_path = self.path / f"date={date}"
-        if not partition_path.exists():
-            return False
-        return len(list(partition_path.glob(self.parquet_names))) > 0
 
     def _compute_partitions_batch(self, dates: List[Date], days_per_batch: int) -> Dict[Date, bool]:
         """Compute multiple partitions in parallel batches. Returns dict mapping date to success status."""
@@ -314,7 +320,7 @@ class ByDateDataset(ByDateDataview):
 def _compute_partitions_worker(dates: List[Date], path: Path, parquet_names: str, dataset_class: type, dataset_kwargs: Dict) -> bool:
     """Worker function for parallel batch computation. Processes multiple dates, partitions and saves. Returns success bool."""
     try:
-        dataset = dataset_class(partitions=dates, path=path, parquet_names=parquet_names, **dataset_kwargs)
+        dataset = dataset_class(path=path, parquet_names=parquet_names, **dataset_kwargs)
         lf = dataset._postprocess_lf(dataset._compute_partitions(dates))
         lf.sink_parquet(pl.PartitionByKey(path, by=['date'], 
                         per_partition_sort_by=pl.col('time')), compression='lz4', mkdir=True)

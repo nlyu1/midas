@@ -70,8 +70,8 @@ def grid_query(lf: pl.LazyFrame, grid_interval: str) -> pl.LazyFrame:
 
 @dataclass(kw_only=True)
 class BinanceLastTradesGrid(ByDateDataset):
-    peg_symbol: str = 'USDT'
-    grid_interval: str = '10m'
+    peg_symbol: str
+    grid_interval: str
     dataset_type: Optional[DatasetType] = None
     src_path: Optional[Path] = None
     parquet_names: str = '*.parquet'
@@ -91,7 +91,6 @@ class BinanceLastTradesGrid(ByDateDataset):
         if not universe_path.is_file():
             raise RuntimeError(f'Expected lossless dataset at {universe_path}')
         self.universe_df = pl.read_parquet(universe_path)
-        self.symbol_enum_type = pl.Enum(self.universe_df['symbol'].unique().sort())
         # logger.info(f'Reading from {self.src_path}\n writing to {self.path}')
         super().__post_init__()
 
@@ -102,19 +101,6 @@ class BinanceLastTradesGrid(ByDateDataset):
             'peg_symbol': self.peg_symbol,
             'grid_interval': self.grid_interval,
         } | super()._get_self_kwargs()
-
-    def _valid_partition(self, date: Date) -> bool:
-        partition_path = self.path / f'date={date}/{self.parquet_names}'
-        try:
-            pl.scan_parquet(partition_path).head(1).collect()
-            return True  
-        except Exception as e:
-            print(f'Date {date} failed: {e}')
-            return False 
-
-    def _postprocess_lf(self, lf: pl.LazyFrame) -> pl.LazyFrame:
-        symbols_enum = pl.Enum(self.universe_df['symbol'].unique().sort())
-        return lf.with_columns(pl.col('symbol').cast(symbols_enum))
 
     def universe(self) -> pl.DataFrame:
         return self.universe_df

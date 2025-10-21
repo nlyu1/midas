@@ -6,7 +6,7 @@ from . import utils
 from . import multiprocessing
 
 # Re-export commonly used utilities at top level
-from .utils import printv
+from .utils import printv, printv_lazy
 from .multiprocessing import ParallelMap
 
 # Make caching utilities accessible
@@ -17,5 +17,6 @@ __all__ = [
     "multiprocessing",
     # Common utilities
     "printv",
+    "printv_lazy", 
     "ParallelMap",
 ]

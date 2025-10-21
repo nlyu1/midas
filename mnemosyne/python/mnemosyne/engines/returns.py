@@ -1,4 +1,5 @@
-import polars as pl 
+import polars as pl
+from atlas import printv_lazy
 
 
 class ReturnsEngine:
@@ -30,7 +31,8 @@ class ReturnsEngine:
             query_lf: pl.LazyFrame, 
             start_time_expr: pl.Expr = pl.col('start_time'), 
             mark_duration: pl.Expr = pl.lit('10m'), 
-            tick_lag_tolerance: pl.Expr = pl.lit('30s')
+            tick_lag_tolerance: pl.Expr = pl.lit('30s'), 
+            verbose_debug: bool = False 
         ) -> pl.LazyFrame:
         """
 
@@ -50,8 +52,16 @@ class ReturnsEngine:
         ):
             raise RuntimeError("Expected query schema symbol(Enum)")
 
+        # Select a slice of the database containing these dates
+        # Sort by tick_time
+        min_date, max_date = query_lf.select(
+            start_time_expr.dt.date().min().alias('min'),
+            start_time_expr.dt.offset_by(mark_duration).dt.date().max().alias('max')
+        ).collect().row(0)
+        printv_lazy(lambda: f'Query min_date: {min_date} max_date: {max_date}', verbose_debug)
+
         query_lf_withidx = query_lf.with_row_index('row_id')
-        # print(query_lf_withidx.collect().shape)
+        printv_lazy(lambda: f'Query shape: {query_lf_withidx.collect().shape}', verbose_debug)
 
         # Append row_id and compute end_time for queries 
         # IMPORTANT: filter to compatible symbols (rest are marked with nans)
@@ -70,14 +80,7 @@ class ReturnsEngine:
                 pl.col('end_time').set_sorted()
             ])
         )
-        # print(f'Query_with_both: {query_with_both.collect().shape}, {query_with_both.collect_schema()}')
-
-        # Select a slice of the database containing these dates
-        # Sort by tick_time
-        min_date, max_date = query_with_both.select(
-            pl.col('start_time').dt.date().min().alias('min'),
-            pl.col('end_time').dt.date().max().alias('max')
-        ).collect().row(0)
+        printv_lazy(lambda: f'Query_with_both: {query_with_both.collect().shape}, {query_with_both.collect_schema()}', verbose_debug)
 
         inrange_db = self.db.filter(
                 pl.col('date').is_between(
@@ -87,7 +90,14 @@ class ReturnsEngine:
             ).drop('date').sort(
                 'symbol', 'tick_time'
             ).with_columns(pl.col('tick_time').set_sorted())
-        # print(f'inrange_db: {inrange_db.collect_schema()}')
+        printv_lazy(lambda: f'inrange_db: {inrange_db.collect_schema()}', verbose_debug)
+        printv_lazy(lambda: f'Query min_date: {min_date} max_date: {max_date}', verbose_debug)
+        printv_lazy(
+            lambda: f"Database dates:\n{self.db.select(pl.col('tick_time').min().alias('min'), pl.col('tick_time').max().alias('max')).collect()}"
+            , verbose_debug)
+        printv_lazy(
+            lambda: f"Filtered database dates:\n{inrange_db.select(pl.col('tick_time').min().alias('min'), pl.col('tick_time').max().alias('max')).collect()}"
+            , verbose_debug)
 
         # Concat to a single query and sort by query_time 
         # row_id, symbol, query_time, query_type
@@ -104,7 +114,7 @@ class ReturnsEngine:
                     pl.lit('end').alias('query_type').cast(query_type_enum)
                 )
             ]).sort(['symbol', 'query_time'])
-        # print(f'long_query: {long_query.collect().shape}, {long_query.collect_schema()}')
+        printv_lazy(lambda: f'long_query: {long_query.collect().shape}, {long_query.collect_schema()}', verbose_debug)
 
         # Do the join-asof 
         # When tick-time is behind query_time beyond specified tolerance, fill with nan
@@ -119,18 +129,22 @@ class ReturnsEngine:
             pl.when(
                 pl.col('tick_time').dt.offset_by(tick_lag_tolerance) >= pl.col('query_time')
             ).then(pl.col('fair')).otherwise(None).alias('fair')
-        ).select('row_id', 'symbol', 'query_time', 'query_type', 'tick_to_query_lag', 'fair')
-        # print(f'joined_lf: {joined_lf.collect().shape}, {joined_lf.collect_schema()}')
+        ).select('row_id', 'symbol', 'query_time', 'query_type', 'tick_to_query_lag', 'fair', 'tick_time')
+        # return query_with_both, long_query, inrange_db, joined_lf 
+        printv_lazy(lambda: f'joined_lf: {joined_lf.collect().shape}, {joined_lf.collect_schema()}', verbose_debug)
 
         # Compute the columns to append
         append_cols = (
             joined_lf.group_by(['row_id', 'symbol'])
             .agg([
+                pl.col('query_time').filter(pl.col('query_type') == 'start').first().alias('start_query_time'), 
+                pl.col('query_time').filter(pl.col('query_type') == 'end').first().alias('end_query_time'), 
+                pl.col('tick_time').filter(pl.col('query_type') == 'start').first().alias('start_tick_time'), 
+                pl.col('tick_time').filter(pl.col('query_type') == 'end').first().alias('end_tick_time'), 
+
                 pl.col('tick_to_query_lag').max().alias('max_tick_to_query_lag'), # This is maximum over ticks
-                # pl.col('query_time').filter(pl.col('query_type') == 'start').first().alias('start_query_time'), 
-                # pl.col('query_time').filter(pl.col('query_type') == 'end').first().alias('end_query_time'), 
-                # pl.col('fair').filter(pl.col('query_type') == 'start').first().alias('start_fair'), 
-                # pl.col('fair').filter(pl.col('query_type') == 'end').first().alias('end_fair'), 
+                pl.col('fair').filter(pl.col('query_type') == 'start').first().alias('start_fair'), 
+                pl.col('fair').filter(pl.col('query_type') == 'end').first().alias('end_fair'), 
                 (
                     (pl.col('fair').filter(pl.col('query_type') == 'end').first() - 
                     pl.col('fair').filter(pl.col('query_type') == 'start').first()) 
@@ -139,7 +153,7 @@ class ReturnsEngine:
             ])
             .sort('row_id')
         ).drop('symbol')
-        # print(f'append_cols: {append_cols.collect().shape}, {append_cols.collect_schema()}')
+        printv_lazy(lambda: f'append_cols: {append_cols.collect().shape}, {append_cols.collect_schema()}', verbose_debug)
 
         result = query_lf_withidx.join(
             append_cols, on='row_id', 

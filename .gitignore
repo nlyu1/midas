@@ -65,6 +65,9 @@ coverage/
 # MSVC Windows builds of rustc may produce these, which are best ignored
 *.pdb
 
+# Parquet files
+*.parquet
+
 # Build artifacts for different architectures
 /target-*/
 
