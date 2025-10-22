@@ -23,13 +23,12 @@ impl<T: BinanceStreamable> BinanceWebstreamWorker<T> {
         local_gateway_port: u16,
     ) -> OrError<Self> {
         if symbols.is_empty() {
-            return Err("BinanceWebstreamWorker error: symbols list cannot be empty".to_string());
+            return Err(anyhow::anyhow!("BinanceWebstreamWorker error: symbols list cannot be empty"));
         }
         if symbols.len() > 1024 {
-            return Err(
+            return Err(anyhow::anyhow!(
                 "BinanceWebstreamWorker error: don't pass in more than 1024 tasks per worker"
-                    .to_string(),
-            );
+            ));
         }
 
         // Agora paths for each symbol

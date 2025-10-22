@@ -3,6 +3,7 @@ use crate::ArgusParquetable;
 use crate::types::{Price, TradingSymbol};
 use agora::Agorable;
 use agora::utils::OrError;
+use anyhow::Context;
 use bimap::BiMap;
 use chrono::prelude::{DateTime, Utc};
 use indoc::writedoc;
@@ -87,7 +88,7 @@ impl HyperliquidStreamable for SpotAssetContext {
     ) -> OrError<Vec<Self>> {
         let received_time = Utc::now();
         let raw: RawSpotAssetContext = serde_json::from_value(data).map_err(|e| {
-            format!(
+            anyhow::anyhow!(
                 "Argus Hyperliquid SpotAssetContext conversion error: cannot convert data into RawSpotAssetContext struct. Check schema. {}",
                 e
             )
@@ -110,7 +111,7 @@ impl HyperliquidStreamable for SpotAssetContext {
 
         let volume_24h = if let Some(vol_str) = raw.ctx.day_ntl_vlm {
             Some(vol_str.parse().map_err(|e| {
-                format!(
+                anyhow::anyhow!(
                     "Argus Hyperliquid SpotAssetContext conversion error: cannot parse volume {}: {}",
                     vol_str, e
                 )
@@ -121,7 +122,7 @@ impl HyperliquidStreamable for SpotAssetContext {
 
         let circulating_supply = if let Some(supply_str) = raw.ctx.circulating_supply {
             Some(supply_str.parse().map_err(|e| {
-                format!(
+                anyhow::anyhow!(
                     "Argus Hyperliquid SpotAssetContext conversion error: cannot parse circulating supply {}: {}",
                     supply_str, e
                 )
@@ -132,7 +133,7 @@ impl HyperliquidStreamable for SpotAssetContext {
 
         let total_supply = if let Some(supply_str) = raw.ctx.total_supply {
             Some(supply_str.parse().map_err(|e| {
-                format!(
+                anyhow::anyhow!(
                     "Argus Hyperliquid SpotAssetContext conversion error: cannot parse total supply {}: {}",
                     supply_str, e
                 )
@@ -248,6 +249,6 @@ impl ArgusParquetable for SpotAssetContext {
                 total_supplies,
             ],
         )
-        .map_err(|e| format!("Failed to create RecordBatch: {}", e))
+        .context("Failed to create RecordBatch")
     }
 }

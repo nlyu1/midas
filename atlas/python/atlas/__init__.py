@@ -4,6 +4,7 @@ from . import atlas as _atlas_ext
 from . import caching
 from . import utils
 from . import multiprocessing
+from . import ctdp
 
 # Re-export commonly used utilities at top level
 from .utils import printv, printv_lazy
@@ -15,8 +16,9 @@ __all__ = [
     "caching",
     "utils",
     "multiprocessing",
+    "ctdp",
     # Common utilities
     "printv",
-    "printv_lazy", 
+    "printv_lazy",
     "ParallelMap",
 ]

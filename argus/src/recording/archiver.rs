@@ -12,6 +12,7 @@
 use crate::constants::HYPERLIQUID_ARCHIVER_FLUSH_INTERVAL_SECONDS;
 use crate::types::TradingSymbol;
 use agora::utils::OrError;
+use anyhow::Context;
 use chrono::{DateTime, Duration, Local, NaiveDateTime, TimeZone};
 use parquet::arrow::ArrowWriter;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -60,12 +61,12 @@ impl Archiver {
 
         // Initialize target directory structure
         fs::create_dir_all(target_dir)
-            .map_err(|e| format!("Failed to create target directory {}: {}", target_dir, e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to create target directory {}: {}", target_dir, e))?;
 
         for data_type in data_types {
             let type_dir = format!("{}/{}", target_dir, data_type);
             fs::create_dir_all(&type_dir)
-                .map_err(|e| format!("Failed to create data type directory {}: {}", type_dir, e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to create data type directory {}: {}", type_dir, e))?;
         }
 
         println!("Target directory structure created successfully");
@@ -238,18 +239,18 @@ impl Archiver {
             .parent()
             .and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
-            .ok_or_else(|| format!("Cannot extract data type from path: {}", filepath))?
+            .ok_or_else(|| anyhow::anyhow!("Cannot extract data type from path: {}", filepath))?
             .to_string();
 
         // Get the filename
         let filename = path
             .file_name()
             .and_then(|n| n.to_str())
-            .ok_or_else(|| format!("Cannot extract filename from path: {}", filepath))?;
+            .ok_or_else(|| anyhow::anyhow!("Cannot extract filename from path: {}", filepath))?;
 
         // Remove .pq extension
         if !filename.ends_with(".pq") {
-            return Err(format!("File does not have .pq extension: {}", filename));
+            return Err(anyhow::anyhow!("File does not have .pq extension: {}", filename));
         }
         let without_ext = &filename[..filename.len() - 3];
 
@@ -257,7 +258,7 @@ impl Archiver {
         // The timestamp part is always 17 characters: "25-01-15 10:30:45"
         // Plus the underscore makes it 18 characters from the end
         if without_ext.len() < 18 {
-            return Err(format!(
+            return Err(anyhow::anyhow!(
                 "Filename too short to contain timestamp: {}",
                 filename
             ));
@@ -265,7 +266,7 @@ impl Archiver {
 
         let split_pos = without_ext.len() - 17;
         if &without_ext[split_pos - 1..split_pos] != "_" {
-            return Err(format!(
+            return Err(anyhow::anyhow!(
                 "Expected underscore before timestamp in: {}",
                 filename
             ));
@@ -279,12 +280,12 @@ impl Archiver {
 
         // Parse timestamp using the format from file.rs: %y-%m-%d %H:%M:%S
         let naive_dt = NaiveDateTime::parse_from_str(timestamp_str, "%y-%m-%d %H:%M:%S")
-            .map_err(|e| format!("Failed to parse timestamp '{}': {}", timestamp_str, e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to parse timestamp '{}': {}", timestamp_str, e))?;
 
         let dt = Local
             .from_local_datetime(&naive_dt)
             .single()
-            .ok_or_else(|| format!("Ambiguous or invalid local datetime: {}", timestamp_str))?;
+            .ok_or_else(|| anyhow::anyhow!("Ambiguous or invalid local datetime: {}", timestamp_str))?;
 
         Ok((data_type, symbol, dt))
     }
@@ -294,16 +295,16 @@ impl Archiver {
         let path = Path::new(src_dir);
 
         if !path.exists() {
-            return Err(format!("Source directory does not exist: {}", src_dir));
+            return Err(anyhow::anyhow!("Source directory does not exist: {}", src_dir));
         }
 
         if !path.is_dir() {
-            return Err(format!("Source path is not a directory: {}", src_dir));
+            return Err(anyhow::anyhow!("Source path is not a directory: {}", src_dir));
         }
 
         // Check that it contains at least one subdirectory
         let has_subdirs = fs::read_dir(path)
-            .map_err(|e| format!("Cannot read source directory {}: {}", src_dir, e))?
+            .map_err(|e| anyhow::anyhow!("Cannot read source directory {}: {}", src_dir, e))?
             .any(|entry| {
                 entry
                     .ok()
@@ -313,7 +314,7 @@ impl Archiver {
             });
 
         if !has_subdirs {
-            return Err(format!(
+            return Err(anyhow::anyhow!(
                 "Source directory {} does not contain any subdirectories",
                 src_dir
             ));
@@ -332,7 +333,7 @@ impl Archiver {
             Self::flush_tmp_file_blocking(&filepath_clone, &target_dir_clone)
         })
         .await
-        .map_err(|e| format!("Task join error: {}", e))??;
+        .context("Task join error")??;
 
         Ok(flushed_record_count)
     }
@@ -354,7 +355,7 @@ impl Archiver {
             symbol.to_string()
         );
         fs::create_dir_all(&target_subdir)
-            .map_err(|e| format!("Failed to create target directory {}: {}", target_subdir, e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to create target directory {}: {}", target_subdir, e))?;
 
         let target_path = format!("{}/data.parquet", target_subdir);
 
@@ -364,14 +365,14 @@ impl Archiver {
             let record_count = Self::recompress_parquet_file(filepath, &target_path)?;
             // Delete the source file
             fs::remove_file(filepath)
-                .map_err(|e| format!("Failed to remove source file {}: {}", filepath, e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to remove source file {}: {}", filepath, e))?;
             Ok(record_count)
         } else {
             // Complex case: merge with existing file
             let record_count = Self::merge_parquet_files(filepath, &target_path)?;
             // Delete the source file after successful merge
             fs::remove_file(filepath)
-                .map_err(|e| format!("Failed to remove source file {}: {}", filepath, e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to remove source file {}: {}", filepath, e))?;
             Ok(record_count)
         }
     }
@@ -380,27 +381,27 @@ impl Archiver {
     fn recompress_parquet_file(src_file: &str, dest_file: &str) -> OrError<usize> {
         // Read source file
         let src_file_handle = fs::File::open(src_file)
-            .map_err(|e| format!("Failed to open source file {}: {}", src_file, e))?;
+            .context("Failed to open source file")?;
 
         let src_builder = ParquetRecordBatchReaderBuilder::try_new(src_file_handle)
-            .map_err(|e| format!("Failed to create reader for source file: {}", e))?;
+            .context("Failed to create reader for source file")?;
 
         let schema = src_builder.schema().clone();
 
         let mut batches = Vec::new();
         let mut src_reader = src_builder
             .build()
-            .map_err(|e| format!("Failed to build reader for source file: {}", e))?;
+            .context("Failed to build reader for source file")?;
 
         for batch_result in src_reader.by_ref() {
             let batch = batch_result
-                .map_err(|e| format!("Failed to read batch from source file: {}", e))?;
+                .context("Failed to read batch from source file")?;
             batches.push(batch);
         }
 
         // Write with ZSTD compression
         let dest_file_handle = fs::File::create(dest_file)
-            .map_err(|e| format!("Failed to create destination file {}: {}", dest_file, e))?;
+            .context("Failed to create destination file")?;
 
         // ZSTD level 3: optimal balance of compression ratio and speed for time-series data
         let props = WriterProperties::builder()
@@ -408,19 +409,19 @@ impl Archiver {
             .build();
 
         let mut writer = ArrowWriter::try_new(dest_file_handle, schema, Some(props))
-            .map_err(|e| format!("Failed to create ArrowWriter: {}", e))?;
+            .context("Failed to create ArrowWriter")?;
 
         let mut total_records = 0;
         for batch in &batches {
             writer
                 .write(batch)
-                .map_err(|e| format!("Failed to write batch: {}", e))?;
+                .context("Failed to write batch")?;
             total_records += batch.num_rows();
         }
 
         writer
             .close()
-            .map_err(|e| format!("Failed to close writer: {}", e))?;
+            .context("Failed to close writer")?;
 
         Ok(total_records)
     }
@@ -429,39 +430,39 @@ impl Archiver {
     fn merge_parquet_files(new_file: &str, existing_file: &str) -> OrError<usize> {
         // Read existing file
         let existing_file_handle = fs::File::open(existing_file)
-            .map_err(|e| format!("Failed to open existing file {}: {}", existing_file, e))?;
+            .context("Failed to open existing file")?;
 
         let existing_builder = ParquetRecordBatchReaderBuilder::try_new(existing_file_handle)
-            .map_err(|e| format!("Failed to create reader for existing file: {}", e))?;
+            .context("Failed to create reader for existing file")?;
 
         let mut existing_batches = Vec::new();
         let mut existing_reader = existing_builder
             .build()
-            .map_err(|e| format!("Failed to build reader for existing file: {}", e))?;
+            .context("Failed to build reader for existing file")?;
 
         for batch_result in existing_reader.by_ref() {
             let batch = batch_result
-                .map_err(|e| format!("Failed to read batch from existing file: {}", e))?;
+                .context("Failed to read batch from existing file")?;
             existing_batches.push(batch);
         }
 
         // Read new file
         let new_file_handle = fs::File::open(new_file)
-            .map_err(|e| format!("Failed to open new file {}: {}", new_file, e))?;
+            .context("Failed to open new file")?;
 
         let new_builder = ParquetRecordBatchReaderBuilder::try_new(new_file_handle)
-            .map_err(|e| format!("Failed to create reader for new file: {}", e))?;
+            .context("Failed to create reader for new file")?;
 
         let schema = new_builder.schema().clone();
 
         let mut new_batches = Vec::new();
         let mut new_reader = new_builder
             .build()
-            .map_err(|e| format!("Failed to build reader for new file: {}", e))?;
+            .context("Failed to build reader for new file")?;
 
         for batch_result in new_reader.by_ref() {
             let batch =
-                batch_result.map_err(|e| format!("Failed to read batch from new file: {}", e))?;
+                batch_result.context("Failed to read batch from new file")?;
             new_batches.push(batch);
         }
 
@@ -472,7 +473,7 @@ impl Archiver {
         // Write to a temporary file, then atomically replace
         let temp_path = format!("{}.tmp", existing_file);
         let temp_file = fs::File::create(&temp_path)
-            .map_err(|e| format!("Failed to create temp file {}: {}", temp_path, e))?;
+            .context("Failed to create temp file")?;
 
         // ZSTD level 3: optimal balance of compression ratio and speed for time-series data
         let props = WriterProperties::builder()
@@ -480,23 +481,23 @@ impl Archiver {
             .build();
 
         let mut writer = ArrowWriter::try_new(temp_file, schema, Some(props))
-            .map_err(|e| format!("Failed to create ArrowWriter: {}", e))?;
+            .context("Failed to create ArrowWriter")?;
 
         let mut total_records = 0;
         for batch in &all_batches {
             writer
                 .write(batch)
-                .map_err(|e| format!("Failed to write batch: {}", e))?;
+                .context("Failed to write batch")?;
             total_records += batch.num_rows();
         }
 
         writer
             .close()
-            .map_err(|e| format!("Failed to close writer: {}", e))?;
+            .context("Failed to close writer")?;
 
         // Atomically replace the existing file
         fs::rename(&temp_path, existing_file)
-            .map_err(|e| format!("Failed to rename {} to {}: {}", temp_path, existing_file, e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to rename {} to {}: {}", temp_path, existing_file, e))?;
 
         Ok(total_records)
     }

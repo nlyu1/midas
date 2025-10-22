@@ -3,6 +3,7 @@ use crate::recording::ArgusParquetable;
 use crate::types::{Price, TradeSize, TradingSymbol};
 use agora::utils::OrError;
 use agora::Agorable;
+use anyhow::Context;
 use bimap::BiMap;
 use chrono::prelude::{DateTime, Utc};
 use indoc::writedoc;
@@ -73,14 +74,14 @@ impl HyperliquidStreamable for TradeUpdate {
 
         // Hyperliquid sends trades as an array: [{coin, px, sz, ...}, ...]
         let raw_trades: Vec<RawTradeUpdate> = serde_json::from_value(data).map_err(|e| {
-            format!(
+            anyhow::anyhow!(
                 "Argus Hyperliquid tradeUpdate conversion error: cannot convert data into Vec<RawTradeUpdate>. Check schema. {}",
                 e
             )
         })?;
 
         if raw_trades.is_empty() {
-            return Err("Argus Hyperliquid tradeUpdate: empty trades array".to_string());
+            return Err(anyhow::anyhow!("Argus Hyperliquid tradeUpdate: empty trades array"));
         }
 
         // Extract coin from first trade and normalize
@@ -96,14 +97,14 @@ impl HyperliquidStreamable for TradeUpdate {
 
         for raw in raw_trades {
             let price: f64 = raw.px.parse().map_err(|e| {
-                format!(
+                anyhow::anyhow!(
                     "Argus Hyperliquid tradeUpdate conversion error: parsed price {} cannot be converted to f64. {}",
                     raw.px, e
                 )
             })?;
 
             let size: f64 = raw.sz.parse().map_err(|e| {
-                format!(
+                anyhow::anyhow!(
                     "Argus Hyperliquid tradeUpdate conversion error: parsed size {} cannot be converted to f64. {}",
                     raw.sz, e
                 )
@@ -116,7 +117,7 @@ impl HyperliquidStreamable for TradeUpdate {
                 price: Price::from_f64(price)?,
                 size: TradeSize::from_f64(size)?,
                 trade_time: DateTime::from_timestamp_millis(raw.time as i64)
-                    .ok_or("Invalid trade time")?,
+                    .ok_or_else(|| anyhow::anyhow!("Invalid trade time"))?,
                 is_buy: raw.side == "B",
             };
 
@@ -227,6 +228,6 @@ impl ArgusParquetable for TradeUpdate {
                 is_buys,
             ],
         )
-        .map_err(|e| format!("Failed to create RecordBatch: {}", e))
+        .context("Failed to create RecordBatch")
     }
 }

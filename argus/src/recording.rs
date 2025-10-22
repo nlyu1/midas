@@ -1,5 +1,6 @@
 use agora::AgorableOption;
 use agora::utils::OrError;
+use anyhow::Context;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
@@ -40,22 +41,22 @@ pub trait ArgusParquetable: Sized + Clone + Send + Sync + 'static {
         let batch = Self::to_record_batch(data)?;
 
         let file = std::fs::File::create(&output_path)
-            .map_err(|e| format!("Failed to create file {:?}: {}", output_path, e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to create file {:?}: {}", output_path, e))?;
 
         let props = WriterProperties::builder()
             .set_compression(Compression::SNAPPY)
             .build();
 
         let mut writer = ArrowWriter::try_new(file, schema, Some(props))
-            .map_err(|e| format!("Failed to create ArrowWriter: {}", e))?;
+            .context("Failed to create ArrowWriter")?;
 
         writer
             .write(&batch)
-            .map_err(|e| format!("Failed to write batch: {}", e))?;
+            .context("Failed to write batch")?;
 
         writer
             .close()
-            .map_err(|e| format!("Failed to close writer: {}", e))?;
+            .context("Failed to close writer")?;
 
         Ok(())
     }

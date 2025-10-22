@@ -1240,6 +1240,7 @@ dependencies = [
     { name = "ipykernel" },
     { name = "ipywidgets" },
     { name = "joblib" },
+    { name = "maturin" },
     { name = "numpy" },
     { name = "polars", extra = ["gpu"] },
 ]
@@ -1257,6 +1258,7 @@ requires-dist = [
     { name = "ipykernel", specifier = ">=6.30.0" },
     { name = "ipywidgets", specifier = ">=8.1.7" },
     { name = "joblib", specifier = ">=1.5.0" },
+    { name = "maturin", extras = ["patchself"], specifier = ">=1.9.6" },
     { name = "numpy", specifier = ">=2.3.3" },
     { name = "polars", extras = ["gpu"], specifier = ">=1.32.0" },
 ]

@@ -506,7 +506,7 @@ impl HyperliquidPublisher {
         let read_guard = self
             .perp_universe
             .try_read()
-            .map_err(|e| format!("Could not read perp_universe: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Could not read perp_universe: {}", e))?;
         Ok(read_guard.clone())
     }
 
@@ -565,7 +565,7 @@ impl HyperliquidPublisher {
         let read_guard = self
             .spot_universe
             .try_read()
-            .map_err(|e| format!("Could not read spot universe: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Could not read spot universe: {}", e))?;
         Ok(read_guard.clone())
     }
 }

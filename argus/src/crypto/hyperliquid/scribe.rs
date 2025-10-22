@@ -2,6 +2,7 @@ use super::{BboUpdate, OrderbookSnapshot, PerpAssetContext, SpotAssetContext, Tr
 use crate::{AgoraDirScribe, Archiver};
 use agora::utils::OrError;
 use agora::{AgorableOption, ConnectionHandle};
+use anyhow::Context;
 use std::time::Duration;
 
 /// Manages scribing of all Hyperliquid market data to disk
@@ -50,7 +51,7 @@ impl HyperliquidScribe {
 
         // Create output directories
         std::fs::create_dir_all(output_dir)
-            .map_err(|e| format!("Failed to create output directory {}: {}", output_dir, e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to create output directory {}: {}", output_dir, e))?;
 
         let data_types = vec![
             "last_trade",
@@ -64,9 +65,9 @@ impl HyperliquidScribe {
             let spot_dir = format!("{}/spot/{}", output_dir, data_type);
             let perp_dir = format!("{}/perp/{}", output_dir, data_type);
             std::fs::create_dir_all(&spot_dir)
-                .map_err(|e| format!("Failed to create directory {}: {}", spot_dir, e))?;
+                .context("Failed to create spot directory")?;
             std::fs::create_dir_all(&perp_dir)
-                .map_err(|e| format!("Failed to create directory {}: {}", perp_dir, e))?;
+                .context("Failed to create perp directory")?;
         }
 
         println!("  Created output directory structure");

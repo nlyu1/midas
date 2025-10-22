@@ -1,8 +1,9 @@
 use super::HyperliquidStreamable;
-use crate::ArgusParquetable; 
+use crate::ArgusParquetable;
 use crate::types::{Price, TradingSymbol};
 use agora::Agorable;
 use agora::utils::OrError;
+use anyhow::Context;
 use bimap::BiMap;
 use chrono::prelude::{DateTime, Utc};
 use indoc::writedoc;
@@ -92,7 +93,7 @@ impl HyperliquidStreamable for PerpAssetContext {
     ) -> OrError<Vec<Self>> {
         let received_time = Utc::now();
         let raw: RawAssetContext = serde_json::from_value(data).map_err(|e| {
-            format!(
+            anyhow::anyhow!(
                 "Argus Hyperliquid PerpAssetContext conversion error: cannot convert data into RawAssetContext struct. Check schema. {}",
                 e
             )
@@ -114,7 +115,7 @@ impl HyperliquidStreamable for PerpAssetContext {
         };
 
         let funding_rate: f64 = raw.ctx.funding.parse().map_err(|e| {
-            format!(
+            anyhow::anyhow!(
                 "Argus Hyperliquid PerpAssetContext conversion error: cannot parse funding rate {}: {}",
                 raw.ctx.funding, e
             )
@@ -122,7 +123,7 @@ impl HyperliquidStreamable for PerpAssetContext {
 
         let open_interest = if let Some(oi_str) = raw.ctx.open_interest {
             Some(oi_str.parse().map_err(|e| {
-                format!(
+                anyhow::anyhow!(
                     "Argus Hyperliquid PerpAssetContext conversion error: cannot parse open interest {}: {}",
                     oi_str, e
                 )
@@ -133,7 +134,7 @@ impl HyperliquidStreamable for PerpAssetContext {
 
         let volume_24h = if let Some(vol_str) = raw.ctx.day_ntl_vlm {
             Some(vol_str.parse().map_err(|e| {
-                format!(
+                anyhow::anyhow!(
                     "Argus Hyperliquid PerpAssetContext conversion error: cannot parse volume {}: {}",
                     vol_str, e
                 )
@@ -262,6 +263,6 @@ impl ArgusParquetable for PerpAssetContext {
                 oracle_prices,
             ],
         )
-        .map_err(|e| format!("Failed to create RecordBatch: {}", e))
+        .context("Failed to create RecordBatch")
     }
 }

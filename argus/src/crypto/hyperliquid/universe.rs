@@ -105,17 +105,17 @@ async fn fetch_perp_meta() -> OrError<PerpMeta> {
         .json(&request)
         .send()
         .await
-        .map_err(|e| format!("Hyperliquid REST API request error (perp meta): {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Hyperliquid REST API request error (perp meta): {}", e))?;
 
     if !response.status().is_success() {
-        return Err(format!(
+        return Err(anyhow::anyhow!(
             "Hyperliquid REST API error (perp meta): HTTP {}",
             response.status()
         ));
     }
 
     let meta: PerpMeta = response.json().await.map_err(|e| {
-        format!(
+        anyhow::anyhow!(
             "Hyperliquid REST API response parse error (perp meta): {}",
             e
         )
@@ -136,17 +136,17 @@ async fn fetch_spot_meta() -> OrError<SpotMeta> {
         .json(&request)
         .send()
         .await
-        .map_err(|e| format!("Hyperliquid REST API request error (spot meta): {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Hyperliquid REST API request error (spot meta): {}", e))?;
 
     if !response.status().is_success() {
-        return Err(format!(
+        return Err(anyhow::anyhow!(
             "Hyperliquid REST API error (spot meta): HTTP {}",
             response.status()
         ));
     }
 
     let meta: SpotMeta = response.json().await.map_err(|e| {
-        format!(
+        anyhow::anyhow!(
             "Hyperliquid REST API response parse error (spot meta): {}",
             e
         )
@@ -218,10 +218,10 @@ fn extract_active_spot_symbols(
 
         let token0_name = token_names
             .get(&token0_idx)
-            .ok_or(format!("Token index {} not found in metadata", token0_idx))?;
+            .ok_or_else(|| anyhow::anyhow!("Token index {} not found in metadata", token0_idx))?;
         let token1_name = token_names
             .get(&token1_idx)
-            .ok_or(format!("Token index {} not found in metadata", token1_idx))?;
+            .ok_or_else(|| anyhow::anyhow!("Token index {} not found in metadata", token1_idx))?;
 
         // Construct normalized name: TOKEN0-TOKEN1 (e.g., "WOW-USDC", "PURR-USDC")
         // Replace / with - and sanitize

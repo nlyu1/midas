@@ -19,6 +19,7 @@ dependencies = [
     "numpy>=2.3.3",
     "ipywidgets>=8.1.7",
     "dill>=0.4.0",
+    "maturin[patchself]>=1.9.6",
 ]
 
 [tool.uv.sources]

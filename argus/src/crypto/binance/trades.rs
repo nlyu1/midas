@@ -3,6 +3,7 @@ use crate::ArgusParquetable;
 use crate::types::{Price, TradeSize, TradingSymbol};
 use agora::Agorable;
 use agora::utils::OrError;
+use anyhow; 
 use chrono::prelude::{DateTime, Utc};
 use indoc::writedoc;
 use serde::{Deserialize, Serialize};
@@ -92,19 +93,19 @@ impl BinanceStreamable for TradeUpdate {
         let received_time = Utc::now(); 
         let msg_ref: &[u8] = msg.as_ref(); 
         let raw: RawTradeUpdate = serde_json::from_slice(msg_ref).map_err(
-            |e| {format!(
+            |e| {anyhow::anyhow!(
                 "Argus Binance tradeUpdate conversion error: cannot convert {} into RawTradeUpdate struct. Check schema. {}", 
                 msg, e
             )}
         )?; 
         let price: f64 = raw.price.parse().map_err(|e| {
-            format!(
+            anyhow::anyhow!(
                 "Argus Binance tradeUpdate conversion error: parsed price {} cannot be converted to f64. {}",
                 raw.price, e 
             )
         })?; 
         let size: f64 = raw.quantity.parse().map_err(|e| {
-            format!(
+            anyhow::anyhow!(
                 "Argus Binance tradeUpdate conversion error: parsed size {} cannot be cnoverted to f64. {}",
                 raw.price, e 
             )
@@ -254,6 +255,6 @@ impl ArgusParquetable for TradeUpdate {
                 is_bid_quotes,
             ],
         )
-        .map_err(|e| format!("Failed to create RecordBatch: {}", e))
+        .map_err(|e| anyhow::anyhow!("Failed to create RecordBatch: {}", e))
     }
 }

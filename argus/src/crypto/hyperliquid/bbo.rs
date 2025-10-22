@@ -1,8 +1,9 @@
 use super::HyperliquidStreamable;
-use crate::ArgusParquetable; 
+use crate::ArgusParquetable;
 use crate::types::{Price, TradeSize, TradingSymbol};
 use agora::Agorable;
 use agora::utils::OrError;
+use anyhow::Context;
 use bimap::BiMap;
 use chrono::prelude::{DateTime, Utc};
 use indoc::writedoc;
@@ -78,7 +79,7 @@ impl HyperliquidStreamable for BboUpdate {
     ) -> OrError<Vec<Self>> {
         let received_time = Utc::now();
         let raw: RawBboUpdate = serde_json::from_value(data).map_err(|e| {
-            format!(
+            anyhow::anyhow!(
                 "Argus Hyperliquid BboUpdate conversion error: cannot convert data into RawBboUpdate struct. Check schema. {}",
                 e
             )
@@ -94,15 +95,15 @@ impl HyperliquidStreamable for BboUpdate {
         // Extract bid and ask from the bbo array
         let bid = raw.bbo[0]
             .as_ref()
-            .ok_or("Argus Hyperliquid BboUpdate: missing bid level")?;
+            .ok_or_else(|| anyhow::anyhow!("Argus Hyperliquid BboUpdate: missing bid level"))?;
         let ask = raw.bbo[1]
             .as_ref()
-            .ok_or("Argus Hyperliquid BboUpdate: missing ask level")?;
+            .ok_or_else(|| anyhow::anyhow!("Argus Hyperliquid BboUpdate: missing ask level"))?;
 
         let bbo_update = BboUpdate {
             symbol: normalized_symbol,
             received_time,
-            time: DateTime::from_timestamp_millis(raw.time as i64).ok_or("Invalid timestamp")?,
+            time: DateTime::from_timestamp_millis(raw.time as i64).ok_or_else(|| anyhow::anyhow!("Invalid timestamp"))?,
             bid_price: Price::from_string(bid.px.clone())?,
             bid_size: TradeSize::from_string(bid.sz.clone())?,
             bid_orders: bid.n,
@@ -229,6 +230,6 @@ impl ArgusParquetable for BboUpdate {
                 ask_orders,
             ],
         )
-        .map_err(|e| format!("Failed to create RecordBatch: {}", e))
+        .context("Failed to create RecordBatch")
     }
 }

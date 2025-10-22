@@ -3,6 +3,7 @@ use crate::types::TradingSymbol;
 use agora::metaserver::AgoraClient;
 use agora::utils::{OrError, TreeTrait};
 use agora::{Agorable, ConnectionHandle, Subscriber};
+use anyhow::Context;
 use chrono::Local;
 use futures_util::StreamExt;
 use std::sync::{Arc, Mutex};
@@ -85,7 +86,7 @@ impl<T: Agorable + ArgusParquetable> SinglePathScribe<T> {
             ArgusParquetable::write_to_parquet(data_snapshot, path_clone)
         })
         .await
-        .map_err(|e| format!("Flush task join error: {}", e))??;
+        .context("Flush task join error")??;
 
         println!(
             "Argus filescribe: flushed {} records to {:?}",
@@ -129,7 +130,7 @@ impl<T: Agorable + ArgusParquetable> AgoraDirScribe<T> {
         let metaclient = AgoraClient::new(agora_metaserver_connection.clone())
             .await
             .map_err(|e| {
-                format!(
+                anyhow::anyhow!(
                     "Argus AgoraDirScribe error: cannot create agora metaclient. {}",
                     e
                 )
@@ -138,7 +139,7 @@ impl<T: Agorable + ArgusParquetable> AgoraDirScribe<T> {
         let children = pathtree
             .get_child(&agora_prefix)
             .map_err(|e| {
-                format!(
+                anyhow::anyhow!(
                     "Argus AgoraDirScribe error: cannot identify children of {}: {}. Filetree: \n{}",
                     agora_prefix,
                     e,
@@ -147,7 +148,7 @@ impl<T: Agorable + ArgusParquetable> AgoraDirScribe<T> {
             })?
             .children();
 
-        let symbols: Result<Vec<TradingSymbol>, String> = children
+        let symbols: Result<Vec<TradingSymbol>, anyhow::Error> = children
             .into_iter()
             .map(|node| TradingSymbol::from_str(node.name()))
             .collect();
@@ -169,7 +170,7 @@ impl<T: Agorable + ArgusParquetable> AgoraDirScribe<T> {
                 &flush_path,
             )
             .await
-            .map_err(|e| format!("Failed to start scribe for {}: {}", agora_path, e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to start scribe for {}: {}", agora_path, e))?;
 
             println!(
                 "Started scribe for {} (agora) -> {} (filesystem)",

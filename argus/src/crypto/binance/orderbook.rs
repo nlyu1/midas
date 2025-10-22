@@ -81,7 +81,7 @@ struct RawOrderbookDiffUpdate {
 
 fn parse_float_from_string(s: String) -> OrError<f64> {
     s.parse().map_err(|e| {
-        format!(
+        anyhow::anyhow!(
             "Argus float parsing error: cannot interpret string {} as price: {}",
             s, e
         )
@@ -93,8 +93,8 @@ impl BinanceStreamable for OrderbookDiffUpdate {
         let received_time = Utc::now();
         let msg_ref: &[u8] = msg.as_ref();
         let raw: RawOrderbookDiffUpdate = serde_json::from_slice(msg_ref).map_err(
-            |e| {format!(
-                "Argus Binance OrderbookDiffUpdate conversion error: cannot convert {} into RawOrderbookDiffUpdate struct. Check schema. {}", 
+            |e| {anyhow::anyhow!(
+                "Argus Binance OrderbookDiffUpdate conversion error: cannot convert {} into RawOrderbookDiffUpdate struct. Check schema. {}",
                 msg, e
             )}
         )?;
@@ -118,7 +118,7 @@ impl BinanceStreamable for OrderbookDiffUpdate {
         let orderbook_diff = OrderbookDiffUpdate {
             symbol: TradingSymbol::from_str(&raw.symbol)?,
             event_time: DateTime::from_timestamp_millis(raw.event_time_ms as i64)
-                .ok_or("Invalid event time")?,
+                .ok_or_else(|| anyhow::anyhow!("Invalid event time"))?,
             received_time,
             first_update_id: raw.first_update_id,
             final_update_id: raw.final_update_id,
@@ -180,7 +180,7 @@ impl BinanceRest for OrderbookDepthUpdate {
         let received_time = Utc::now();
         let msg_ref: &[u8] = msg.as_ref();
         let raw: RawOrderbookDepthUpdate = serde_json::from_slice(msg_ref).map_err(|e| {
-            format!(
+            anyhow::anyhow!(
                 "Argus Binance OrderbookDepthUpdate conversion error: cannot convert {} into RawOrderbookDepthUpdate struct. Check schema. {}",
                 msg, e
             )

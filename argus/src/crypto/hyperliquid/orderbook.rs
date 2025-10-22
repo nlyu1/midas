@@ -1,8 +1,9 @@
 use super::HyperliquidStreamable;
-use crate::ArgusParquetable; 
+use crate::ArgusParquetable;
 use crate::types::{Price, TradeSize, TradingSymbol};
 use agora::Agorable;
 use agora::utils::OrError;
+use anyhow::Context;
 use bimap::BiMap;
 use chrono::prelude::{DateTime, Utc};
 use indoc::writedoc;
@@ -74,7 +75,7 @@ impl HyperliquidStreamable for OrderbookSnapshot {
     ) -> OrError<Vec<Self>> {
         let received_time = Utc::now();
         let raw: RawOrderbookSnapshot = serde_json::from_value(data).map_err(|e| {
-            format!(
+            anyhow::anyhow!(
                 "Argus Hyperliquid OrderbookSnapshot conversion error: cannot convert data into RawOrderbookSnapshot struct. Check schema. {}",
                 e
             )
@@ -106,7 +107,7 @@ impl HyperliquidStreamable for OrderbookSnapshot {
         let orderbook = OrderbookSnapshot {
             symbol: normalized_symbol,
             received_time,
-            time: DateTime::from_timestamp_millis(raw.time as i64).ok_or("Invalid timestamp")?,
+            time: DateTime::from_timestamp_millis(raw.time as i64).ok_or_else(|| anyhow::anyhow!("Invalid timestamp"))?,
             bid_levels,
             ask_levels,
         };
@@ -251,7 +252,7 @@ impl ArgusParquetable for OrderbookSnapshot {
                 Arc::new(bid_struct),
                 None,
             )
-            .map_err(|e| format!("Failed to create bid_levels ListArray: {}", e))?,
+            .context("Failed to create bid_levels ListArray")?,
         );
 
         // Build ask_levels as List<Struct>
@@ -295,13 +296,13 @@ impl ArgusParquetable for OrderbookSnapshot {
                 Arc::new(ask_struct),
                 None,
             )
-            .map_err(|e| format!("Failed to create ask_levels ListArray: {}", e))?,
+            .context("Failed to create ask_levels ListArray")?,
         );
 
         RecordBatch::try_new(
             schema.clone(),
             vec![symbols, received_times, times, bid_levels, ask_levels],
         )
-        .map_err(|e| format!("Failed to create RecordBatch: {}", e))
+        .context("Failed to create RecordBatch")
     }
 }
