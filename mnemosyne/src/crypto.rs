@@ -14,15 +14,9 @@
 /// - **Universe cache**: Avoid expensive S3 listing (recompute with `--recompute-universe`)
 /// - **Hive cache**: Incremental validation (only new files), recompute with `--recompute-onhive`
 /// - **Corrupted files**: Auto-deleted during validation to prevent bad data accumulation
-///
-/// ## Parallelism Pattern
-/// `update_universe` uses rayon + per-thread tokio runtimes:
-/// - Rayon: thread-level parallelism for download workers
-/// - Per-thread tokio: each worker spawns isolated runtime for async HTTP downloads
-/// - Necessary because rayon thread pool ≠ tokio thread pool
-
 pub mod binance;
 pub use binance::{BinanceSpotTradeBook, BinanceUmFuturesTradeBook};
+pub mod hyperliquid;
 
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
@@ -46,7 +40,7 @@ fn polars_date_to_naive(days_since_epoch: i32) -> Option<NaiveDate> {
 /// Validates both metadata AND data pages (catches more corruption than just metadata check).
 /// Returns None if corrupted → file is automatically deleted to prevent accumulation of bad data.
 /// Caller must pre-filter to "data.parquet" files only.
-fn extract_symbol_date_first_row(path: &Path) -> Option<LazyFrame> {
+fn extract_symbol_date_first_row(path: &Path) -> Option<(String, NaiveDate)> {
     let path_str = path.display().to_string();
     // Closure: delete corrupted file and log detailed error info
     let delete_and_report = |stage: &str, err: &dyn std::fmt::Display| {
@@ -81,12 +75,14 @@ fn extract_symbol_date_first_row(path: &Path) -> Option<LazyFrame> {
             return None;
         }
     };
-    println!(
-        "{:?}, parquet verification successful",
-        &path,
-    );
+    println!("{:?}, parquet verification successful", &path,);
 
-    Some(df.lazy())
+    // Extract actual values from the DataFrame
+    let symbol = df.column("symbol").ok()?.str().ok()?.get(0)?;
+    let date_val = df.column("date").ok()?.date().ok()?.phys.get(0)?;
+    let date = polars_date_to_naive(date_val)?;
+
+    Some((symbol.to_string(), date))
 }
 
 #[derive(Debug, Default)]
@@ -110,9 +106,6 @@ pub trait CryptoDataInterface: Send + Sync + Sized + 'static {
     // ============================================
     // REQUIRED: Implementation-specific methods
     // ============================================
-
-    /// Build download URL for a specific symbol and date
-    fn build_download_url(&self, symbol: &str, date: NaiveDate) -> String;
 
     /// Build hive-style path for processed parquet file
     fn build_hive_path(&self, symbol: &str, date: NaiveDate) -> PathBuf;
@@ -253,7 +246,9 @@ pub trait CryptoDataInterface: Send + Sync + Sized + 'static {
             let mut hive_df_clone = hive_df.clone();
             tokio::task::spawn_blocking(move || {
                 let mut file = fs::File::create(&cache_path_clone)?;
-                ParquetWriter::new(&mut file).finish(&mut hive_df_clone)?;
+                ParquetWriter::new(&mut file)
+                    .with_compression(ParquetCompression::Brotli(Some(BrotliLevel::try_new(3)?)))
+                    .finish(&mut hive_df_clone)?;
                 Ok::<(), anyhow::Error>(())
             })
             .await??;
@@ -318,7 +313,7 @@ pub trait CryptoDataInterface: Send + Sync + Sized + 'static {
 
             // Incremental validation: only validate NEW files not in cache (optimization)
             // Uses rayon's par_bridge for thread-level parallelism across filesystem walk
-            let new_lazyframes: Vec<LazyFrame> = WalkDir::new(&hive_data_path)
+            let new_pairs: Vec<(String, NaiveDate)> = WalkDir::new(&hive_data_path)
                 .min_depth(1)
                 .into_iter()
                 .par_bridge() // Rayon parallelization over iterator
@@ -340,12 +335,9 @@ pub trait CryptoDataInterface: Send + Sync + Sized + 'static {
                 })
                 .collect();
 
-            println!(
-                "Collected {} additional symbol-date pairs",
-                new_lazyframes.len()
-            );
+            println!("Collected {} additional symbol-date pairs", new_pairs.len());
             // Build final result: cached_pairs + new data
-            if new_lazyframes.is_empty() && cached_lf.is_none() {
+            if new_pairs.is_empty() && cached_lf.is_none() {
                 // No files at all
                 return Ok(DataFrame::empty_with_schema(&Schema::from_iter(vec![
                     Field::new("symbol".into(), DataType::String),
@@ -357,8 +349,15 @@ pub trait CryptoDataInterface: Send + Sync + Sized + 'static {
             if let Some(lf) = cached_lf {
                 all_frames.push(lf);
             }
-            // Add new data
-            all_frames.extend(new_lazyframes);
+            // Add computed symbol-date pairs
+            if !new_pairs.is_empty() {
+                let (symbols, dates): (Vec<String>, Vec<NaiveDate>) = new_pairs.into_iter().unzip();
+                let new_df = df!(
+                    "symbol" => symbols,
+                    "date" => dates,
+                )?;
+                all_frames.push(new_df.lazy());
+            }
             // Concatenate all
             let onhive_keys = concat(
                 all_frames,
