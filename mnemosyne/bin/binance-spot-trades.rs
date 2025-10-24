@@ -68,7 +68,7 @@ async fn main() -> Result<()> {
         peg_symbol.to_string(),
         Some(earliest_date),
         None,
-    )?);
+    ).await?);
 
     // Initialize universe
     tb.initialize_universe(args.recompute_universe).await?;

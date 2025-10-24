@@ -9,7 +9,8 @@ use std::collections::HashSet;
 const BUCKET: &str = "data.binance.vision";
 const REGION: &str = "ap-northeast-1";
 
-async fn create_s3_client() -> Client {
+/// Create a new S3 client for the Binance data bucket.
+pub async fn create_s3_client() -> Client {
     let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .region(aws_config::Region::new(REGION))
         .load()
@@ -36,8 +37,7 @@ fn normalize_s3_prefix(prefix: &str) -> String {
 
 /// List all S3 object keys (files) under a prefix with automatic pagination.
 /// Returns full file paths, e.g.: "data/spot/daily/trades/BTCUSDT/BTCUSDT-trades-2025-10-05.zip"
-pub async fn get_all_keys(_base_url: &str, prefix: &str) -> Result<Vec<String>> {
-    let client = create_s3_client().await;
+pub async fn get_all_keys(client: &Client, _base_url: &str, prefix: &str) -> Result<Vec<String>> {
     let fixed_prefix = normalize_s3_prefix(prefix);
     let mut all_keys = Vec::new();
 
@@ -63,8 +63,7 @@ pub async fn get_all_keys(_base_url: &str, prefix: &str) -> Result<Vec<String>> 
 
 /// Get all trading pair subdirectories from S3 using CommonPrefixes (directory listing).
 /// Returns trading pairs, e.g.: ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
-pub async fn get_all_trade_pairs(_base_url: &str, prefix: &str) -> Result<Vec<String>> {
-    let client = create_s3_client().await;
+pub async fn get_all_trade_pairs(client: &Client, _base_url: &str, prefix: &str) -> Result<Vec<String>> {
     let fixed_prefix = normalize_s3_prefix(prefix);
     let mut trade_pairs = HashSet::new();
 

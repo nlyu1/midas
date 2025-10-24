@@ -12,9 +12,9 @@
 /// - **UM Futures**: `https://data.binance.vision/data/futures/um/daily/trades/{SYMBOL}USDT/{SYMBOL}USDT-trades-{date}.zip`
 ///
 /// ## Schema Handling
-/// Uses compile-time type parameter `S: BinanceCsvSchema` to handle format differences:
-/// - **SpotTradeSchema**: 7 columns, no header
-/// - **UmFuturesTradeSchema**: 6 columns, has header (missing `is_best_match`)
+/// Uses compile-time type parameter `S: BinanceSchemaPipeline` to handle format differences:
+/// - **SpotTradeSchema**: 7 columns, no header, conditional timestamp conversion
+/// - **UmFuturesTradeSchema**: 6 columns, has header, unconditional timestamp conversion
 ///
 /// ## Timestamp Normalization
 /// Binance changed format at 2025-01-01: pre-2025 milliseconds → post-2025 microseconds.
@@ -31,8 +31,9 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::crypto::binance::s3_helpers::{get_all_keys, get_all_trade_pairs};
-use crate::crypto::binance::{BINANCE_S3_BASE_URL, BinanceCsvSchema, binance_timestamp_cutoff_ms};
+use crate::crypto::binance::s3_helpers::{create_s3_client, get_all_keys, get_all_trade_pairs};
+use crate::crypto::binance::{BINANCE_S3_BASE_URL, BinanceSchemaPipeline};
+use aws_sdk_s3::Client as S3Client;
 
 /// Regex for extracting dates from S3 paths (e.g., "BTCUSDT-trades-2019-09-08.zip" -> "2019-09-08")
 static DATE_RE: once_cell::sync::Lazy<Regex> =
@@ -44,9 +45,10 @@ static DATE_RE: once_cell::sync::Lazy<Regex> =
 
 /// Spot trade schema (7 columns, no header row in CSV files)
 /// Corresponds to Binance spot market daily trade data format
+/// Note: Spot timestamps changed at 2025-01-01 (pre: milliseconds, post: microseconds)
 pub struct SpotTradeSchema;
 
-impl BinanceCsvSchema for SpotTradeSchema {
+impl BinanceSchemaPipeline for SpotTradeSchema {
     fn get_schema() -> Schema {
         Schema::from_iter(vec![
             Field::new("trade_id".into(), DataType::Int64),
@@ -62,13 +64,36 @@ impl BinanceCsvSchema for SpotTradeSchema {
     fn has_header() -> bool {
         false
     }
+
+    fn postprocess_df(df: DataFrame) -> Result<DataFrame> {
+        // Spot: Conditional timestamp conversion (pre-2025: ms, post-2025: us)
+        // Cutoff: 2025-01-01 00:00:00 UTC
+        use chrono::{NaiveDate, NaiveTime};
+        let cutoff_ms = NaiveDate::from_ymd_opt(2025, 1, 1)
+            .unwrap()
+            .and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap())
+            .and_utc()
+            .timestamp_millis();
+
+        let result = df
+            .lazy()
+            .with_column(
+                when(col("time").gt_eq(lit(cutoff_ms)))
+                    .then(col("time")) // Post-2025: already microseconds, use as-is
+                    .otherwise(col("time") * lit(1000)) // Pre-2025: milliseconds -> multiply by 1000
+                    .cast(DataType::Datetime(TimeUnit::Microseconds, None)),
+            )
+            .collect()?;
+        Ok(result)
+    }
 }
 
 /// UM (USDT-margined) Futures trade schema (6 columns, includes header row in CSV files)
 /// Note: Futures CSVs have one fewer column than spot (no "is_best_match" field)
+/// Note: Futures timestamps are ALWAYS in milliseconds (unlike spot which changed in 2025)
 pub struct UmFuturesTradeSchema;
 
-impl BinanceCsvSchema for UmFuturesTradeSchema {
+impl BinanceSchemaPipeline for UmFuturesTradeSchema {
     fn get_schema() -> Schema {
         Schema::from_iter(vec![
             Field::new("id".into(), DataType::Int64),
@@ -83,31 +108,22 @@ impl BinanceCsvSchema for UmFuturesTradeSchema {
     fn has_header() -> bool {
         true
     }
+
+    fn postprocess_df(df: DataFrame) -> Result<DataFrame> {
+        // Futures: ALWAYS convert from milliseconds to microseconds (no date-based conditional)
+        let result = df
+            .lazy()
+            .with_column(
+                (col("time") * lit(1000)).cast(DataType::Datetime(TimeUnit::Microseconds, None)),
+            )
+            .collect()?;
+        Ok(result)
+    }
 }
 
 // ============================================
 // Module-level helpers (single source of truth)
 // ============================================
-
-/// Convert Binance timestamps handling format change at 2025-01-01.
-/// Pre-2025 data uses milliseconds, post-2025 uses microseconds.
-/// Normalizes all timestamps to microseconds for consistent datetime representation.
-/// Returns dataframe with 'time' column converted to Datetime(Microseconds, None).
-fn convert_binance_timestamps(df: DataFrame) -> Result<DataFrame> {
-    let cutoff_ms = binance_timestamp_cutoff_ms();
-
-    let result = df
-        .lazy()
-        .with_column(
-            // Conditional conversion based on cutoff date
-            when(col("time").gt_eq(lit(cutoff_ms)))
-                .then(col("time")) // Post-2025: already microseconds, use as-is
-                .otherwise(col("time") * lit(1000)) // Pre-2025: milliseconds -> multiply by 1000
-                .cast(DataType::Datetime(TimeUnit::Microseconds, None)),
-        )
-        .collect()?;
-    Ok(result)
-}
 
 /// Build the download URL for a specific symbol and date.
 /// Example output: "https://data.binance.vision/data/spot/daily/trades/BTCUSDT/BTCUSDT-trades-2025-10-05.zip"
@@ -132,18 +148,18 @@ fn build_download_url(
     )
 }
 
-/// Synchronous processing: unzip → read CSV → normalize timestamps → write parquet → delete zip.
+/// Synchronous processing: unzip → read CSV → postprocess → write parquet → delete zip.
 /// This is the core processing function called by both sequential and parallel execution paths.
 ///
 /// Processing pipeline:
 /// 1. Extract CSV from zip archive
 /// 2. Parse CSV with schema-specific settings (header presence varies by market type)
-/// 3. Normalize timestamps to microseconds (handles pre/post-2025 format change)
+/// 3. Postprocess DataFrame (schema-specific, e.g., timestamp normalization)
 /// 4. Write to Hive-partitioned parquet with LZ4 compression
 /// 5. Clean up zip file to save disk space
 ///
 /// Returns: Number of rows processed
-fn process_zip_to_parquet<S: BinanceCsvSchema>(
+fn process_zip_to_parquet<S: BinanceSchemaPipeline>(
     zip_path: &Path,
     hive_path: &Path,
     symbol: &str,
@@ -187,8 +203,8 @@ fn process_zip_to_parquet<S: BinanceCsvSchema>(
         .into_reader_with_file_handle(cursor)
         .finish()?;
 
-    // Phase 3: Normalize timestamps (pre-2025: ms, post-2025: us -> all to us)
-    df = convert_binance_timestamps(df)?;
+    // Phase 3: Schema-specific postprocessing (e.g., timestamp normalization)
+    df = S::postprocess_df(df)?;
 
     let num_rows = df.height();
 
@@ -210,7 +226,7 @@ fn process_zip_to_parquet<S: BinanceCsvSchema>(
 // Main BinanceTradeBook struct
 // ============================================
 
-pub struct BinanceTradeBook<S: BinanceCsvSchema> {
+pub struct BinanceTradeBook<S: BinanceSchemaPipeline> {
     /// Raw zip storage directory. Example (Spot USDT): `/data/mnemosyne/binance/raw/spot/last_trade/peg_symbol=USDT`
     /// Files: `BTCUSDT/BTCUSDT-trades-2025-10-05.zip`
     raw_data_path: PathBuf,
@@ -245,11 +261,14 @@ pub struct BinanceTradeBook<S: BinanceCsvSchema> {
     /// Optional latest date (applied to universe after S3 fetch)
     latest_date: Option<NaiveDate>,
 
+    /// Shared S3 client
+    s3_client: S3Client,
+
     _schema: PhantomData<S>,
 }
 
-impl<S: BinanceCsvSchema> BinanceTradeBook<S> {
-    pub fn new(
+impl<S: BinanceSchemaPipeline> BinanceTradeBook<S> {
+    pub async fn new(
         hive_data_path: PathBuf,
         raw_data_path: PathBuf,
         data_base_url: String,
@@ -273,6 +292,9 @@ impl<S: BinanceCsvSchema> BinanceTradeBook<S> {
 
         let universe_cache_path = hive_data_path.join("universe.parquet");
 
+        // Create shared S3 client
+        let s3_client = create_s3_client().await;
+
         Ok(Self {
             raw_data_path,
             hive_data_path,
@@ -284,13 +306,11 @@ impl<S: BinanceCsvSchema> BinanceTradeBook<S> {
             peg_symbol,
             earliest_date,
             latest_date,
+            s3_client,
             _schema: PhantomData,
         })
     }
-}
 
-// Implement BinanceDataInterface trait
-impl<S: BinanceCsvSchema> CryptoDataInterface for BinanceTradeBook<S> {
     fn build_download_url(&self, symbol: &str, date: NaiveDate) -> String {
         build_download_url(
             &self.data_base_url,
@@ -300,7 +320,10 @@ impl<S: BinanceCsvSchema> CryptoDataInterface for BinanceTradeBook<S> {
             &self.peg_symbol,
         )
     }
+}
 
+// Implement BinanceDataInterface trait
+impl<S: BinanceSchemaPipeline> CryptoDataInterface for BinanceTradeBook<S> {
     fn build_hive_path(&self, symbol: &str, date: NaiveDate) -> PathBuf {
         self.hive_data_path
             .join(format!("date={}", date))
@@ -342,7 +365,7 @@ impl<S: BinanceCsvSchema> CryptoDataInterface for BinanceTradeBook<S> {
     async fn fetch_new_universe(&self) -> Result<DataFrame> {
         // Phase 1: Discover trading pairs (e.g., BTCUSDT, ETHUSDT) for this market
         println!("Fetching new universe...waiting for trade pairs");
-        let trade_pairs = get_all_trade_pairs(&self.base_url, &self.prefix).await?;
+        let trade_pairs = get_all_trade_pairs(&self.s3_client, &self.base_url, &self.prefix).await?;
         let peg_suffix = &self.peg_symbol;
         // Filter to requested peg (e.g., keep BTCUSDT, discard BTCUSDC)
         let symbols: Vec<String> = trade_pairs
@@ -361,6 +384,7 @@ impl<S: BinanceCsvSchema> CryptoDataInterface for BinanceTradeBook<S> {
                 let symbol_clone = symbol.clone();
                 let base_url = self.base_url.clone();
                 let peg_symbol = self.peg_symbol.clone();
+                let s3_client = self.s3_client.clone();
                 let prefix = format!("{}/{}{}", self.prefix, symbol, peg_symbol);
                 println!("Fetching available dates for {}", symbol);
 
@@ -368,7 +392,7 @@ impl<S: BinanceCsvSchema> CryptoDataInterface for BinanceTradeBook<S> {
                     // Add per-symbol timeout (30 seconds) to prevent individual symbols from hanging
                     let timeout_duration = std::time::Duration::from_secs(30);
                     let result = tokio::time::timeout(timeout_duration, async {
-                        let paths = get_all_keys(&base_url, &prefix).await?;
+                        let paths = get_all_keys(&s3_client, &base_url, &prefix).await?;
                         let paths: Vec<String> = paths
                             .into_iter()
                             .filter(|x| !x.ends_with(".CHECKSUM")) // Exclude checksum files
