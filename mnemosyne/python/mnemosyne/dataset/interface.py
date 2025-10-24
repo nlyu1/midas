@@ -1,3 +1,35 @@
+"""
+Date-partitioned dataset abstractions with validation caching and parallel computation.
+
+## ByDateDataview (Read-only)
+Hive-partitioned data by date: `{path}/date={date}/**/*.parquet`
+
+**Validation Workflow:**
+- Partitions inferred from `universe()['date'].unique()`
+- Default validation: attempt to read parquet files via `_valid_partition(date)`
+- Results cached to `{path}/validated_partitions.json` (persistent)
+- Parallel validation using process pool (`num_workers`)
+- Access via `lazyframe()` or `__getitem__(dates)` (validates before loading)
+
+**Subclass Override:**
+- `universe()`: Return DataFrame with "date", "symbol" columns (required)
+- `_valid_partition(date)`: Custom validation logic (optional, default checks readability)
+- `_get_self_kwargs()`: Worker reconstruction params (optional, for custom attributes)
+
+## ByDateDataset (Computation)
+Extends ByDateDataview with parallel computation.
+
+**Computation Workflow:**
+- `compute(recompute=False)`: Computes missing (uncached) partitions in parallel batches
+- Workers call `_compute_partitions(dates) -> LazyFrame` for each batch
+- Auto-partitioning: `sink_parquet(PartitionByKey(by=['date']))`
+- Successful partitions marked valid and cached
+- Raises RuntimeError if any batch fails
+
+**Subclass Override:**
+- `_compute_partitions(dates)`: Compute data for date batch (required)
+"""
+
 from abc import ABC, abstractmethod
 from datetime import date as Date
 from dataclasses import dataclass, field
@@ -71,10 +103,24 @@ class ByDateDataview(ABC):
 
     def _valid_partition(self, date: Date) -> bool:
         """
-        Validate a single partition by attempting to read from it.
-        Checks if partition exists and parquet files are readable.
-        Override for custom validation logic (e.g., schema validation, row count checks).
+        Validate a single partition (called in worker process during parallel validation).
+
+        Default: Checks partition exists and parquet files are readable.
+        Override for custom logic (e.g., schema validation, row count checks, data integrity).
+
+        Called during:
+        - `validate()` / `invalid_partitions()`: Parallel batch validation
+        - `valid_partition(date)`: Single partition check
+        - `__getitem__(dates)` / `lazyframe()`: Pre-load validation
+
+        Args:
+            date: Partition date to validate
+
+        Returns:
+            True if valid, False otherwise
         """
+        # Uncomment this line to monkey-patch: force recomputation. Override _compute_partitions as well. 
+        # return False 
         partition_path = self.path / f'date={date}/{self.parquet_names}'
         try:
             pl.scan_parquet(partition_path).head(1).collect()
@@ -105,7 +151,14 @@ class ByDateDataview(ABC):
         return results
 
     def _get_self_kwargs(self) -> Dict:
-        """Return kwargs needed to reconstruct instance in worker process. Override and aggregate with super()."""
+        """
+        Return kwargs needed to reconstruct instance in worker process.
+        Override to pass custom attributes to workers. Call super() and merge results.
+
+        Example:
+            def _get_self_kwargs(self):
+                return {**super()._get_self_kwargs(), 'api_key': self.api_key}
+        """
         return {}
 
     def _postprocess_lf(self, lf) -> pl.LazyFrame:
@@ -122,8 +175,14 @@ class ByDateDataview(ABC):
     @abstractmethod
     def universe(self) -> pl.DataFrame:
         """
-        Returns a dataframe with "date", "symbol" columns. 
-        Partitions are inferred from the "date" columns
+        Return universe DataFrame defining available data.
+
+        Required columns:
+        - "date": Date dtype (partitions inferred from unique dates)
+        - "symbol": String dtype (trading symbols)
+
+        May include additional columns (e.g., "hour" for intraday data).
+        Called during __post_init__ to infer partitions and build symbol enum.
         """
         pass
 
@@ -262,9 +321,26 @@ class ByDateDataset(ByDateDataview):
     @abstractmethod
     def _compute_partitions(self, dates: List[Date]) -> pl.LazyFrame:
         """
-        Compute data for multiple dates. Must be implemented by subclass.
-        Returns single DataFrame containing all dates. Will be auto-partitioned and saved by worker.
-        Raises on error.
+        Compute data for a batch of dates (called in worker process).
+
+        Implementation pattern:
+        1. Query universe for symbols available on these dates
+        2. Download/fetch/compute data for (date, symbol) pairs
+        3. Return single LazyFrame containing all dates
+
+        Worker automatically:
+        - Partitions by date: `sink_parquet(PartitionByKey(by=['date']))`
+        - Applies `_postprocess_lf()` (symbol enum casting, etc.)
+        - Validates and caches successful partitions
+
+        Args:
+            dates: Batch of dates to compute (typically 30 days via days_per_batch)
+
+        Returns:
+            LazyFrame with all dates (must include 'date' column for partitioning)
+
+        Raises:
+            Exception on failure (marks batch as failed, logged to user)
         """
         pass
 
@@ -321,9 +397,9 @@ def _compute_partitions_worker(dates: List[Date], path: Path, parquet_names: str
     """Worker function for parallel batch computation. Processes multiple dates, partitions and saves. Returns success bool."""
     try:
         dataset = dataset_class(path=path, parquet_names=parquet_names, **dataset_kwargs)
-        lf = dataset._postprocess_lf(dataset._compute_partitions(dates))
+        lf = dataset._compute_partitions(dates)
         lf.sink_parquet(pl.PartitionByKey(path, by=['date'], 
-                        per_partition_sort_by=pl.col('time')), compression='lz4', mkdir=True)
+                        per_partition_sort_by=pl.col('time')), compression='brotli', mkdir=True)
         return True
     except Exception as e:
         logger.error(f"Worker computation failed for batch {dates[0]} to {dates[-1]}: {e}")

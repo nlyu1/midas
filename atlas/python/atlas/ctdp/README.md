@@ -4,9 +4,9 @@ A modular, type-aware library for creating cumulative total-dependence plots wit
 
 ## Overview
 
-CTDP provides three-tier API for analyzing feature distributions through cumulative plots:
-1. **Functional** - Pure stateless plotting
-2. **Stateful** - Persistent cache with filter manipulation
+CTDP provides a three-tier API for analyzing feature distributions through cumulative plots:
+1. **Functional** - Pure stateless plotting with Polars expressions
+2. **Stateful** - Persistent cache with filter manipulation via `CTDPCache` class
 3. **Interactive** - Streamlit app for exploration
 
 ## Installation
@@ -20,7 +20,7 @@ The module is part of the `atlas` package. Ensure you have:
 
 ### 1. Functional API (Stateless)
 
-Pure functional plotting for quick analysis in notebooks:
+Pure functional plotting with Polars expressions:
 
 ```python
 import polars as pl
@@ -29,26 +29,31 @@ from atlas.ctdp import plot_ctdp
 # Prepare data
 df = pl.read_parquet("data.parquet").lazy()
 
-# Generate plots
+# Generate plots with expressions
 plots = plot_ctdp(
     df=df,
-    accum_cols=['null_frac'],           # Metrics to accumulate
-    feature_cols=['return', 'lag'],     # Features to slice by
-    weight_col='weight',                 # Weighting column
-    n_ticks=5,                          # Number of x-axis ticks
+    accum_cols=[pl.col('null_frac')],                      # Metrics to accumulate
+    feature_cols=[
+        pl.col('return'),                                   # Raw column
+        pl.col('lag').log().alias('log_lag'),              # Computed feature!
+    ],
+    weight_col=pl.col('weight'),
+    n_ticks=5,
 )
 
-# Display in notebook
+# Display
 plots[0].show()
-
-# Save to HTML
 plots[0].write_html("plot.html")
+```
+
+**String shortcuts** (converted to `pl.col(str)` internally):
+```python
+plots = plot_ctdp(df, accum_cols=['y'], feature_cols=['x'], weight_col='w')
 ```
 
 **With filters:**
 ```python
-# Create 2-row filter DataFrame
-# Row 0 = min values, Row 1 = max values
+# 2-row DataFrame: row 0 = min, row 1 = max
 filters = pl.DataFrame({
     'return': [-0.1, 0.1],
     'lag': [None, 10.0],  # None = no bound
@@ -59,79 +64,79 @@ plots = plot_ctdp(df, ..., filters=filters)
 
 ### 2. Stateful API (Persistent Cache)
 
-Create persistent state for reproducible analysis:
+Create persistent state using `CT DPCache`:
 
 ```python
-from atlas.ctdp import create_ctdp, load_ctdp_filters, save_ctdp_filters, generate_plots
-from atlas.ctdp import update_filter, remove_filter
+from atlas.ctdp import create_ctdp_cache, CTDPCache
 import polars as pl
 
-# Create state (caches data, initializes metadata)
-path = create_ctdp(
+# Create cache (evaluates expressions, saves compressed parquet)
+path = create_ctdp_cache(
     df=my_lazyframe,
-    accum_cols=['null_frac'],
-    feature_cols=['return', 'max_tick_to_query_lag'],
-    weight_col='weight',
+    accum_cols=[pl.col('null_frac')],
+    feature_cols=[
+        pl.col('return'),
+        pl.col('max_tick_to_query_lag'),
+    ],
+    weight_col=pl.col('weight'),
     n_ticks=7,
-    num_cols=2,
 )
-# Returns: PosixPath('/data/atlas/ctdp_20251021_142530')
+# Returns: '/data/atlas/ctdp_20251021_143022'
 
-# Manipulate filters
-filters = load_ctdp_filters(path)
-filters = update_filter(filters, 'return', -0.05, 0.05)
-filters = update_filter(filters, 'max_tick_to_query_lag', None, 5.0)
-save_ctdp_filters(path, filters)
+# Load cache and manipulate
+cache = CTDPCache(path)
+cache.update_filter('return', -0.05, 0.05)
+cache.update_filter('max_tick_to_query_lag', None, 5.0)  # No lower bound
 
-# Generate plots with current state
-plots = generate_plots(path)
+plots = cache.generate_plots()
 plots[0].show()
 
-# Later: reload and continue
-filters = load_ctdp_filters(path)
-filters = remove_filter(filters, 'return')
-save_ctdp_filters(path, filters)
-plots = generate_plots(path)
+# Later: reload
+cache = CTDPCache('/data/atlas/ctdp_20251021_143022')
+cache.remove_filter('return')
+plots = cache.generate_plots()
 ```
 
 ### 3. Interactive App
 
-Launch Streamlit app for interactive exploration:
+Launch Streamlit app:
 
 ```bash
-# Create state first
+# Create cache first
 python -c "
-from atlas.ctdp import create_ctdp
+from atlas.ctdp import create_ctdp_cache
 import polars as pl
+
 df = pl.read_parquet('data.parquet').lazy()
-path = create_ctdp(df, accum_cols=['y'], feature_cols=['x'], weight_col='w')
+path = create_ctdp_cache(
+    df,
+    accum_cols=[pl.col('y')],
+    feature_cols=[pl.col('x')],
+    weight_col=pl.col('w')
+)
 print(f'Created: {path}')
 "
 
 # Launch app
-streamlit run python/atlas/ctdp/run_ctdp_app.py -- --path /data/atlas/ctdp_20251021_142530
-
-# Or with uv
-uv run streamlit run python/atlas/ctdp/run_ctdp_app.py -- --path /data/atlas/ctdp_20251021_142530
+streamlit run python/atlas/ctdp/run_ctdp_app.py -- --path /data/atlas/ctdp_20251021_143022
 ```
 
 Or programmatically:
 ```python
 from atlas.ctdp import run_app
-from pathlib import Path
-
-run_app(Path('/data/atlas/ctdp_20251021_142530'))
+run_app('/data/atlas/ctdp_20251021_143022')
 ```
 
-## Complete Workflow Example
+## Complete Workflow Examples
+
+### Example 1: Trading Analysis
 
 ```python
 import polars as pl
-from atlas.ctdp import create_ctdp, plot_ctdp
-from pathlib import Path
+from atlas.ctdp import plot_ctdp, create_ctdp_cache, CTDPCache
 
-# 1. Load and prepare data
-df = pl.read_parquet("./plotting_dev_parquet.parquet")
+# Load and aggregate trading data
+df = pl.read_parquet("./data.parquet")
 agg_df = (
     df.group_by("symbol", "date")
     .agg(
@@ -144,56 +149,223 @@ agg_df = (
     )
 )
 
-# 2. Quick exploration (functional)
+# Quick exploration: How does null_frac accumulate across return distribution?
 plots = plot_ctdp(
     df=agg_df.lazy(),
-    accum_cols=['null_frac'],
-    feature_cols=['return', 'max_tick_to_query_lag'],
-    weight_col='weight',
+    accum_cols=[pl.col('null_frac')],
+    feature_cols=[pl.col('return')],
+    weight_col=pl.col('weight'),
+    n_ticks=5,
 )
-plots[0].write_html("quick_exploration.html")
+plots[0].show()  # In Jupyter
+# Insight: Check if null data concentrates in extreme returns
 
-# 3. Create persistent state for deeper analysis
-cache_path = create_ctdp(
+# Advanced: Add computed features
+plots_detailed = plot_ctdp(
     df=agg_df.lazy(),
-    accum_cols=['null_frac'],
-    feature_cols=['return', 'max_tick_to_query_lag'],
-    weight_col='weight',
-    cache_dir=Path('/data/atlas/my_analysis'),  # Optional: auto-generated if None
+    accum_cols=[pl.col('null_frac')],
+    feature_cols=[
+        pl.col('return'),
+        pl.col('return').abs().alias('abs_return'),  # Magnitude regardless of direction
+        pl.col('max_tick_to_query_lag').log().alias('log_lag'),  # Log-scale lag
+    ],
+    weight_col=pl.col('weight'),
+)
+# Now we can see null_frac across 3 different feature views
+
+# Create persistent cache for deeper analysis
+path = create_ctdp_cache(
+    df=agg_df.lazy(),
+    accum_cols=[pl.col('null_frac')],
+    feature_cols=[
+        pl.col('return'),
+        pl.col('max_tick_to_query_lag'),
+    ],
+    weight_col=pl.col('weight'),
     n_ticks=7,
 )
+print(f"Cache created: {path}")
 
-# 4. Launch interactive app
-# streamlit run python/atlas/ctdp/run_ctdp_app.py -- --path /data/atlas/my_analysis
+# Programmatic filtering
+cache = CTDPCache(path)
+cache.update_filter('return', -0.05, 0.05)  # Focus on small returns
+cache.update_filter('max_tick_to_query_lag', None, 10.0)  # Cap lag at 10
+plots = cache.generate_plots()
+plots[0].write_html("filtered_analysis.html")
+
+# Launch interactive app for stakeholders
+# streamlit run python/atlas/ctdp/run_ctdp_app.py -- --path {path}
 ```
 
-In the app:
-- Adjust filters using type-aware widgets (numeric, datetime, timedelta, date)
-- Filter changes are automatically persisted
-- Statistics update in real-time (filtered count, retention %)
-- Plots regenerate with current filters
-- All state survives app restarts
+### Example 2: Financial Metrics Analysis
+
+```python
+import polars as pl
+from atlas.ctdp import plot_ctdp
+
+# Load financial data
+df = pl.scan_parquet("financial_data.parquet")
+
+# Analyze revenue distribution with multiple metrics
+plots = plot_ctdp(
+    df=df,
+    accum_cols=[
+        pl.col('profit_margin'),
+        pl.col('customer_count'),
+        (pl.col('marketing_spend') / pl.col('revenue')).alias('marketing_ratio'),
+    ],
+    feature_cols=[
+        pl.col('revenue'),
+        pl.col('revenue').log().alias('log_revenue'),
+        (pl.col('revenue') / pl.col('employee_count')).alias('revenue_per_employee'),
+    ],
+    weight_col=pl.col('transaction_count'),
+)
+
+# Interpretation:
+# - How does profit margin accumulate as revenue grows?
+# - Where do most customers concentrate in the revenue distribution?
+# - Is marketing spend efficient across revenue segments?
+```
+
+### Example 3: A/B Test Analysis
+
+```python
+import polars as pl
+from atlas.ctdp import plot_ctdp
+
+df = pl.scan_parquet("ab_test_results.parquet")
+
+# Compare control vs treatment
+for variant in ['control', 'treatment']:
+    variant_df = df.filter(pl.col('variant') == variant)
+
+    plots = plot_ctdp(
+        df=variant_df,
+        accum_cols=[
+            pl.col('conversion_rate'),
+            pl.col('revenue_per_user'),
+        ],
+        feature_cols=[
+            pl.col('session_duration'),
+            pl.col('pages_viewed'),
+            (pl.col('clicks') / pl.col('impressions')).alias('ctr'),
+        ],
+        weight_col=pl.col('user_count'),
+    )
+
+    plots[0].write_html(f"{variant}_analysis.html")
+
+# Insight: Compare how metrics accumulate differently between variants
+```
+
+### Example 4: Time-Series Lag Analysis
+
+```python
+import polars as pl
+from atlas.ctdp import create_ctdp_cache, CTDPCache
+
+df = pl.scan_parquet("time_series_data.parquet")
+
+# Create cache with time-based features
+path = create_ctdp_cache(
+    df=df,
+    accum_cols=[
+        pl.col('error_rate'),
+        pl.col('timeout_count'),
+    ],
+    feature_cols=[
+        pl.col('processing_lag'),
+        pl.col('processing_lag').log().alias('log_lag'),
+        pl.col('queue_depth'),
+    ],
+    weight_col=pl.col('request_count'),
+)
+
+# Interactive exploration in app
+# Users can filter by lag ranges to identify problematic segments
+cache = CTDPCache(path)
+cache.update_filter('processing_lag', 0, 100)  # Focus on reasonable lags
+plots = cache.generate_plots()
+
+# Answer questions like:
+# - At what lag threshold does error rate spike?
+# - How much of our traffic operates under 50ms lag?
+```
+
+### Example 5: Minimal Quickstart
+
+```python
+import polars as pl
+from atlas.ctdp import plot_ctdp
+
+# Simplest possible usage
+df = pl.scan_parquet("data.parquet")
+
+plots = plot_ctdp(
+    df=df,
+    accum_cols=['metric_y'],      # String shortcut
+    feature_cols=['feature_x'],    # Automatically converted to pl.col()
+    weight_col='sample_weight',
+)
+
+plots[0].show()
+```
+
+## Key Design Features
+
+### Expression Evaluation
+
+**At cache creation:**
+- Expressions are evaluated once via `sink_parquet` (streaming, lazy)
+- Only required columns saved (minimal storage)
+- Output names extracted via `.meta.output_name()`
+- Stored as strings in `metadata.json`
+
+**After cache creation:**
+- All operations work with column name strings
+- Expressions already computed and saved
+
+**Benefits:**
+- ✅ Flexible feature engineering without intermediate files
+- ✅ Minimal storage (only what you need)
+- ✅ Fast streaming execution via `sink_parquet`
+
+### CTDPCache Class
+
+Stateful manager for app usage:
+
+```python
+cache = CTDPCache(path)
+
+# Properties
+cache.path          # Path object
+cache.metadata      # CTDPMetadata object
+cache.filters       # pl.DataFrame (2-row format)
+
+# Methods
+cache.load_data() → LazyFrame
+cache.update_filter(col, min, max)
+cache.remove_filter(col)
+cache.save_filters()
+cache.reload_filters()
+cache.update_settings(n_ticks=, num_cols=)
+cache.generate_plots() → List[Figure]
+```
 
 ## State Persistence
 
-CTDP state is stored in three files:
+CTDP state stored in three files:
 
 ```
-/data/atlas/ctdp_20251021_142530/
-├── data.parquet       # Cached DataFrame
-├── metadata.json      # Column names, settings
+/data/atlas/ctdp_20251021_143022/
+├── data.parquet       # Cached data (lz4 compressed, selected columns only)
+├── metadata.json      # Column names (strings), settings
 └── filters.parquet    # 2-row DataFrame with filter bounds
 ```
 
 ### Filter Format
 
-Filters are stored as a 2-row Polars DataFrame:
-- **Row 0**: minimum values
-- **Row 1**: maximum values
-- **Columns**: filtered features (missing column = no filter)
-- **Values**: `None` = no bound on that side
-
-Example:
 ```python
 filters = pl.DataFrame({
     'return': [-0.1, 0.1],              # -0.1 <= return <= 0.1
@@ -201,18 +373,17 @@ filters = pl.DataFrame({
 })
 ```
 
-This format:
-- ✅ Native Polars type preservation (datetime, timedelta, etc.)
-- ✅ Efficient parquet serialization
-- ✅ Simple manipulation with standard Polars operations
-- ✅ No custom type serialization needed
+- **Row 0**: minimum values
+- **Row 1**: maximum values
+- **Missing column**: no filter
+- **None value**: no bound on that side
 
 ### Metadata Format
 
 ```json
 {
   "accum_cols": ["null_frac"],
-  "feature_cols": ["return", "max_tick_to_query_lag"],
+  "feature_cols": ["return", "log_lag"],
   "weight_col": "weight",
   "n_ticks": 7,
   "num_cols": 2,
@@ -221,6 +392,8 @@ This format:
 }
 ```
 
+Note: `log_lag` is the output name from `pl.col('lag').log().alias('log_lag')`.
+
 ## API Reference
 
 ### Functional API
@@ -228,9 +401,9 @@ This format:
 ```python
 plot_ctdp(
     df: pl.LazyFrame,
-    accum_cols: List[str],
-    feature_cols: List[str],
-    weight_col: str,
+    accum_cols: Union[List[Union[pl.Expr, str]], pl.Expr, str],
+    feature_cols: Union[List[Union[pl.Expr, str]], pl.Expr, str],
+    weight_col: Union[pl.Expr, str],
     n_ticks: int = 5,
     filters: Optional[pl.DataFrame] = None,
     format_fns: Optional[Dict[str, Callable]] = None,
@@ -241,43 +414,39 @@ plot_ctdp(
 
 ```python
 # Creation
-create_ctdp(
+create_ctdp_cache(
     df: pl.LazyFrame,
-    accum_cols: List[str],
-    feature_cols: List[str],
-    weight_col: str,
-    cache_dir: Optional[Path] = None,  # Auto-generates: /data/atlas/ctdp_{timestamp}
+    accum_cols: Union[List[Union[pl.Expr, str]], pl.Expr, str],
+    feature_cols: Union[List[Union[pl.Expr, str]], pl.Expr, str],
+    weight_col: Union[pl.Expr, str],
+    cache_dir: Optional[Path] = None,  # Auto-generates
     n_ticks: int = 5,
     num_cols: int = 2,
-) -> Path
+) -> str  # Returns path string
 
-# Loading
-load_ctdp_metadata(cache_dir: Path) -> CTDPMetadata
-load_ctdp_filters(cache_dir: Path) -> pl.DataFrame
-load_ctdp_data(cache_dir: Path) -> pl.LazyFrame
+# Cleanup
+delete_cache(path: Union[str, Path], verbose: bool = True)
 
-# Saving
-save_ctdp_filters(cache_dir: Path, filters: pl.DataFrame)
-save_ctdp_metadata(cache_dir: Path, metadata: CTDPMetadata)
-
-# Filter manipulation
-update_filter(filters: pl.DataFrame, col_name: str, min_val: Any, max_val: Any) -> pl.DataFrame
-remove_filter(filters: pl.DataFrame, col_name: str) -> pl.DataFrame
-get_filter_range(filters: pl.DataFrame, col_name: str) -> Optional[Tuple[Any, Any]]
-
-# Plotting
-generate_plots(cache_dir: Path, format_fns: Optional[dict] = None) -> List[go.Figure]
+# CTDPCache class
+class CTDPCache:
+    def __init__(self, path: Union[str, Path])
+    @property def filters() -> pl.DataFrame
+    def load_data() -> pl.LazyFrame
+    def update_filter(col_name: str, min_val: Any, max_val: Any)
+    def remove_filter(col_name: str)
+    def save_filters()
+    def reload_filters()
+    def update_settings(n_ticks: Optional[int], num_cols: Optional[int])
+    def generate_plots(format_fns: Optional[dict]) -> List[go.Figure]
 ```
 
 ### App API
 
 ```python
-run_app(cache_dir: Path)
+run_app(cache_dir: Union[str, Path])
 ```
 
 ## Type Support
-
-CTDP automatically detects and handles:
 
 | Type | Polars dtype | Widget | Format Example |
 |------|--------------|--------|----------------|
@@ -286,318 +455,140 @@ CTDP automatically detects and handles:
 | Datetime | Datetime | date_input | `2025-01-21 14:30:00` |
 | Date | Date | date_input | `2025-01-21` |
 
-Custom formatting:
+## Advanced Usage
+
+### Custom Formatting
+
 ```python
-def my_formatter(value):
-    return f"${value:,.2f}"
+def price_format(value):
+    return f"${value:,.2f}M"
 
 plots = plot_ctdp(
     df=df,
     ...,
-    format_fns={'price': my_formatter}
+    format_fns={'revenue': price_format}
 )
 ```
+
+### Computed Features
+
+```python
+plot_ctdp(
+    df=df,
+    accum_cols=[
+        pl.col('volume'),
+        (pl.col('high') - pl.col('low')).alias('range'),
+    ],
+    feature_cols=[
+        pl.col('price'),
+        pl.col('price').pct_change().alias('returns'),
+        pl.col('volume').log().alias('log_volume'),
+        (pl.col('close') / pl.col('open') - 1).alias('intraday_return'),
+    ],
+    weight_col=pl.col('shares'),
+)
+```
+
+### Validation Example
+
+```python
+try:
+    path = create_ctdp_cache(
+        df=df,
+        accum_cols=[pl.col('x'), pl.col('y').alias('x')],  # Duplicate!
+        feature_cols=[pl.col('z')],
+        weight_col=pl.col('w'),
+    )
+except ValueError as e:
+    print(e)  # "Duplicate output names detected: ['x']"
+```
+
+On error, partially created directories are automatically cleaned up.
 
 ---
 
 ## Design & Architecture
 
-### Design Philosophy
-
-**Key Principles:**
-1. **Separation of concerns** - Plotting, state, UI are independent
-2. **Type-native persistence** - Leverage Polars/Parquet for type safety
-3. **Fully vectorized** - No row-by-row iteration, all Polars expressions
-4. **Progressive disclosure** - Three API tiers for different use cases
-5. **Stateless core** - Functional plotting has no side effects
-
 ### Module Structure
 
 ```
 python/atlas/ctdp/
-├── config.py          # Constants (DEFAULT_PLOT_PATH, etc.)
+├── config.py          # Constants
 ├── formatting.py      # Type detection & formatting
-├── plotting.py        # Core plot_ctdp() - pure functional
-├── state.py          # Persistence & session management
-├── app.py            # Streamlit UI components
+├── plotting.py        # Core plot_ctdp() - fully vectorized
+├── state.py          # CTDPCache class + persistence
+├── app.py            # Streamlit UI
 ├── run_ctdp_app.py   # CLI entry point
-└── __init__.py       # Public API exports
+└── __init__.py       # Public API
 ```
 
-**Dependency graph:**
-```
-run_ctdp_app.py
-    └── app.py
-            └── state.py
-                    └── plotting.py
-                            └── formatting.py
-                                    └── config.py
-```
+### Expression Flow
 
-### Core Algorithms
-
-**CTDP Generation** (`plotting.py`):
+**Creation:**
 ```
-For each feature_col in feature_cols:
-    1. Sort DataFrame by feature_col (ascending)
-    2. Compute cumulative sums:
-       - weight_cumsum = cumsum(weight_col)
-       - weight_norm = weight_cumsum / sum(weight_col)  # [0, 1]
-       - For each accum_col: accum_cumsum = cumsum(accum_col)
-    3. Generate x-ticks at quantiles:
-       - Compute feature quantiles [0, 0.25, 0.5, 0.75, 1.0]
-       - Find nearest index for each quantile
-       - Extract (weight_norm[idx], formatted_feature[idx])
-    4. Create Plotly figure:
-       - X-axis: weight_norm
-       - Y-axes: One trace per accum_col (cumulative)
-       - Custom xticks showing feature values
-       - Hover: feature value at position
+User provides pl.Expr
+    ↓
+Extract output names via .meta.output_name()
+    ↓
+Validate uniqueness
+    ↓
+df.select(exprs).sink_parquet()  (lazy, streaming!)
+    ↓
+Save metadata with string names
 ```
 
-**Fully Vectorized:**
-- No Python loops over rows
-- All operations use Polars expressions
-- Single pass for cumsum operations
-- Quantile-based tick generation uses `arg_min()` for nearest neighbor
-
-**Filter Application** (`state.py`):
+**Usage:**
 ```
-For each column in filters DataFrame:
-    min_val = filters[col][0]
-    max_val = filters[col][1]
-
-    if min_val is not None:
-        df = df.filter(pl.col(col) >= min_val)
-    if max_val is not None:
-        df = df.filter(pl.col(col) <= max_val)
+Load metadata (strings)
+    ↓
+CTDPCache.generate_plots()
+    ↓
+plot_ctdp(df, feature_cols=["return", "log_lag"], ...)  (strings!)
+    ↓
+Normalize: strings → pl.col(str)
+    ↓
+Plot generation
 ```
 
-Lazy evaluation: Filters are applied to LazyFrame, actual filtering happens during `collect()`.
+### Performance
 
-### State Management Design
+- **Lazy evaluation**: Uses `sink_parquet` for streaming execution
+- **Minimal storage**: Only selected columns saved
+- **Vectorization**: All Polars operations use expressions
+- **Single collection**: Data collected once per plot generation
 
-**Why 2-row DataFrame for filters?**
-- Polars Parquet handles all type serialization automatically
-- No custom JSON serialization for datetime/timedelta/date
-- Type-safe: impossible to deserialize as wrong type
-- Simple manipulation: just DataFrame operations
-- Efficient: binary format, compressed
+### Error Handling
 
-**Alternative considered (rejected):**
-```json
-{
-  "filters": {
-    "return": {"min": -0.1, "max": 0.1, "type": "float"},
-    "timestamp": {"min": "2025-01-01", "max": "2025-01-21", "type": "datetime"}
-  }
-}
-```
-❌ Requires custom type serialization/deserialization
-❌ Error-prone type reconstruction
-❌ More code to maintain
-
-**Chosen approach:**
 ```python
-filters = pl.DataFrame({
-    'return': [-0.1, 0.1],
-    'timestamp': [datetime(2025,1,1), datetime(2025,1,21)]
-})
-filters.write_parquet("filters.parquet")
-```
-✅ Native Polars types preserved
-✅ Zero custom serialization code
-✅ Type safety guaranteed by Polars
+create_ctdp_cache(...) attempts:
+    1. Normalize expressions
+    2. Extract names
+    3. Validate uniqueness
+    4. Create directory
+    5. Sink parquet  # <-- Polars validates expressions here
+    6. Save metadata
+    7. Create filters
 
-### App State Flow
-
-```
-User opens app
-    ↓
-Load: metadata.json, filters.parquet, data.parquet (scan)
-    ↓
-Render filter widgets (type-aware based on column dtype)
-    ↓
-User adjusts filter
-    ↓
-Update filters DataFrame → save_ctdp_filters()
-    ↓
-Apply filters to LazyFrame → collect()
-    ↓
-Compute statistics (filtered count, retention)
-    ↓
-Generate plots via plot_ctdp()
-    ↓
-Render plots in grid
-    ↓
-[Repeat on interaction]
-```
-
-**State persistence triggers:**
-- Filter change → Immediate save to `filters.parquet`
-- Settings change (n_ticks, num_cols) → Immediate save to `metadata.json`
-- Data → Never modified after initial `create_ctdp()`
-
-### Type System
-
-**Type Detection** (`formatting.py:detect_col_type`):
-```python
-pl.Duration   → 'timedelta'
-pl.Datetime   → 'datetime'
-pl.Date       → 'date'
-*             → 'numeric'
-```
-
-**Type Formatting** (`formatting.py:format_value`):
-```python
-timedelta     → "123.456s"
-datetime      → "2025-01-21 14:30:00"
-date          → "2025-01-21"
-numeric       → "3.14"
-```
-
-**Widget Mapping** (`app.py:_create_filter_widget`):
-```python
-timedelta     → st.number_input (seconds) + conversion
-datetime      → st.date_input + datetime.combine()
-date          → st.date_input
-numeric       → st.number_input
-```
-
-### Performance Considerations
-
-**Data Collection:**
-- LazyFrame collected **once** per plot generation
-- Filters applied lazily (no intermediate materialization)
-- App: Full data loaded once at startup (for range calculation)
-
-**Vectorization:**
-- All cumulative sums: single `cum_sum()` call
-- Quantile tick generation: vectorized via `arg_min()`
-- Filter application: Polars expression tree optimization
-
-**Caching:**
-- App: Streamlit's `@st.cache_data` can be added for plot generation
-- Data: Already cached to disk via `data.parquet`
-
-**Scaling:**
-- Large datasets: Consider sampling before `create_ctdp()`
-- Many features: Grid layout prevents excessive scrolling
-- Plotly HTML size: ~100KB per 10K points (acceptable for most cases)
-
-### Extension Points
-
-**Custom Formatting:**
-```python
-def custom_format(value):
-    return f"${value:,.2f}M"
-
-plot_ctdp(df, ..., format_fns={'revenue': custom_format})
-```
-
-**Custom Accumulation:**
-Just add more columns to `accum_cols`:
-```python
-plot_ctdp(
-    df=df,
-    accum_cols=['null_frac', 'mean_price', 'total_volume'],
-    ...
-)
-```
-
-**Additional Metrics:**
-Compute in preprocessing, then include in `accum_cols`:
-```python
-df = df.with_columns([
-    (pl.col('price').std() / pl.col('price').mean()).alias('cv')
-])
-plot_ctdp(df, accum_cols=['cv'], ...)
+On error:
+    - Print error message
+    - Delete created directory
+    - Raise ValueError with context
 ```
 
 ### Future Enhancements
 
-**Potential additions:**
-1. **Subsampling** - For very large datasets, subsample plot data while preserving quantiles
-2. **Multiple weights** - Support different weighting schemes
-3. **Categorical features** - Extend to categorical slicing (bar charts)
-4. **Comparison mode** - Overlay multiple CTDP sessions for A/B testing
-5. **Export** - Download filtered data from app
-6. **Annotations** - Add text annotations to plots
-7. **Theming** - Customizable color schemes
-
-**Backward compatibility:**
-- Metadata includes `version` field for migration support
-- Future changes should extend, not break existing states
-
-### Testing Strategy
-
-**Unit tests:**
-- `formatting.py` - All type conversions
-- `plotting.py` - Individual helper functions
-- `state.py` - Filter manipulation logic
-
-**Integration tests:**
-- Full workflow: create → manipulate → generate
-- Round-trip: save → load → verify equality
-- App: Streamlit test framework (if needed)
-
-**Test data:**
-- Use existing `plotting_dev_parquet.parquet`
-- Create minimal synthetic data for edge cases
-
-### Known Limitations
-
-1. **Filter granularity** - Only range filters (no regex, contains, etc.)
-2. **Plot customization** - Limited Plotly configuration exposure
-3. **Data immutability** - Cached data cannot be updated (must recreate)
-4. **Single metric per trace** - Can't plot derived metrics without preprocessing
-5. **Memory** - Full data loaded in app (not streaming)
-
-### Troubleshooting
-
-**Common issues:**
-
-1. **Import errors:**
-   - Ensure `PYTHONPATH` includes `python/atlas`
-   - Or install package: `pip install -e python/atlas`
-
-2. **Streamlit app won't start:**
-   - Verify cache directory exists
-   - Check `metadata.json` is valid JSON
-   - Ensure all three files present
-
-3. **Type errors in filters:**
-   - Filters must match column dtypes exactly
-   - Use `pl.Duration`, not raw timedelta for duration columns
-
-4. **Performance issues:**
-   - Reduce `n_ticks` to decrease tick generation overhead
-   - Pre-filter data before `create_ctdp()`
-   - Consider sampling large datasets
-
-### Code Navigation
-
-**To understand plotting algorithm:**
-1. Start: `plotting.py:plot_ctdp()`
-2. Follow: `_create_single_plot()` → `_prepare_plot_data()` → `_generate_xticks()`
-3. End: `_create_plotly_figure()`
-
-**To understand state persistence:**
-1. Start: `state.py:create_ctdp()`
-2. Load: `load_ctdp_*()` functions
-3. Save: `save_ctdp_*()` functions
-4. Manipulate: `update_filter()`, `remove_filter()`
-
-**To understand app flow:**
-1. Entry: `run_ctdp_app.py:main()`
-2. Core: `app.py:run_app()`
-3. Widgets: `_create_filter_widget()`, `_render_filter_grid()`
-4. Display: `_render_plots_grid()`
+- **Subsampling**: For massive datasets
+- **Multiple weights**: Different weighting schemes
+- **Categorical features**: Bar chart support
+- **Comparison mode**: Overlay multiple caches
+- **Export**: Download filtered data from app
 
 ### Version History
 
-- **0.1.0** (2025-10-21) - Initial implementation
-  - Three-tier API (functional, stateful, app)
-  - Type-aware filtering (numeric, datetime, date, timedelta)
-  - Polars-native state persistence
-  - Vectorized plot generation
+- **0.1.0** (2025-10-21)
+  - Initial implementation
+  - Expression-based API (Polars expressions + strings)
+  - `CTDPCache` class for stateful operations
+  - Type-aware filtering
+  - Vectorized plotting
+  - `sink_parquet` for lazy caching

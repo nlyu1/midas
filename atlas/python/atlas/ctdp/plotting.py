@@ -1,6 +1,6 @@
 """Core CTDP plotting functionality - fully vectorized using Polars and Plotly"""
 
-from typing import List, Dict, Callable, Optional, Tuple, Any
+from typing import List, Dict, Callable, Optional, Tuple, Any, Union
 import polars as pl
 import plotly.graph_objects as go
 import numpy as np
@@ -9,11 +9,29 @@ from .formatting import detect_col_type, format_value, get_col_range
 from .config import DEFAULT_N_TICKS
 
 
+def _normalize_exprs(exprs: Union[List[Union[pl.Expr, str]], pl.Expr, str]) -> List[pl.Expr]:
+    """
+    Normalize expressions: convert str → pl.col(str), pass through pl.Expr.
+
+    Args:
+        exprs: Single expression/string or list of expressions/strings
+
+    Returns:
+        List of Polars expressions
+    """
+    # Handle single expression/string
+    if isinstance(exprs, (pl.Expr, str)):
+        exprs = [exprs]
+
+    # Convert strings to pl.col()
+    return [pl.col(e) if isinstance(e, str) else e for e in exprs]
+
+
 def plot_ctdp(
     df: pl.LazyFrame,
-    accum_cols: List[str],
-    feature_cols: List[str],
-    weight_col: str,
+    accum_cols: Union[List[Union[pl.Expr, str]], pl.Expr, str],
+    feature_cols: Union[List[Union[pl.Expr, str]], pl.Expr, str],
+    weight_col: Union[pl.Expr, str],
     n_ticks: int = DEFAULT_N_TICKS,
     filters: Optional[pl.DataFrame] = None,
     format_fns: Optional[Dict[str, Callable[[Any], str]]] = None,
@@ -30,9 +48,9 @@ def plot_ctdp(
 
     Args:
         df: Input LazyFrame
-        accum_cols: Column names to accumulate (y-axis metrics)
-        feature_cols: Feature column names to slice by (one plot per feature)
-        weight_col: Weight column name
+        accum_cols: Expressions or column names to accumulate (y-axis metrics)
+        feature_cols: Expressions or column names to slice by (one plot per feature)
+        weight_col: Expression or column name for weighting
         n_ticks: Number of x-axis ticks at quantiles (default: 5)
         filters: Optional 2-row DataFrame with min/max filter values
         format_fns: Optional custom formatters {feature_name: format_fn}
@@ -40,21 +58,37 @@ def plot_ctdp(
     Returns:
         List of plotly Figures, one per feature column
 
-    Example:
+    Examples:
+        >>> # With strings
+        >>> plots = plot_ctdp(df, accum_cols=['y'], feature_cols=['x'], weight_col='w')
+
+        >>> # With expressions
         >>> plots = plot_ctdp(
-        ...     df=my_lazyframe,
-        ...     accum_cols=['null_frac'],
-        ...     feature_cols=['return', 'lag'],
-        ...     weight_col='weight',
+        ...     df,
+        ...     accum_cols=[pl.col('null_frac')],
+        ...     feature_cols=[pl.col('return'), pl.col('lag').log().alias('log_lag')],
+        ...     weight_col=pl.col('weight'),
         ... )
-        >>> plots[0].show()
     """
-    # Apply filters if provided
+    # Normalize to expressions
+    accum_exprs = _normalize_exprs(accum_cols)
+    feature_exprs = _normalize_exprs(feature_cols)
+    weight_expr = _normalize_exprs(weight_col)[0]
+
+    # Extract output names
+    accum_names = [e.meta.output_name() for e in accum_exprs]
+    feature_names = [e.meta.output_name() for e in feature_exprs]
+    weight_name = weight_expr.meta.output_name()
+
+    # Select columns (evaluate expressions)
+    df_selected = df.select([*accum_exprs, *feature_exprs, weight_expr])
+
+    # Apply filters (work with column names)
     if filters is not None and filters.width > 0:
-        df = _apply_filters(df, filters)
+        df_selected = _apply_filters(df_selected, filters)
 
     # Collect LazyFrame once
-    df_collected = df.collect()
+    df_collected = df_selected.collect()
 
     # Generate format functions
     if format_fns is None:
@@ -62,20 +96,22 @@ def plot_ctdp(
 
     # Create one plot per feature
     plots = []
-    for feature_col in feature_cols:
+    for feature_name in feature_names:
         # Get or create format function
-        if feature_col not in format_fns:
-            col_type = detect_col_type(df_collected, feature_col)
-            format_fn = lambda val, ct=col_type: format_value(val, ct)
+        if feature_name not in format_fns:
+            col_type = detect_col_type(df_collected, feature_name)
+
+            def format_fn(val, ct=col_type):
+                return format_value(val, ct)
         else:
-            format_fn = format_fns[feature_col]
+            format_fn = format_fns[feature_name]
 
         # Create plot
         fig = _create_single_plot(
             df=df_collected,
-            feature_col=feature_col,
-            accum_cols=accum_cols,
-            weight_col=weight_col,
+            feature_col=feature_name,
+            accum_cols=accum_names,
+            weight_col=weight_name,
             n_ticks=n_ticks,
             format_fn=format_fn,
         )

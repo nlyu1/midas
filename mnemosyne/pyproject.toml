@@ -20,6 +20,8 @@ dependencies = [
     "ipywidgets>=8.1.7",
     "dill>=0.4.0",
     "maturin[patchself]>=1.9.6",
+    "boto3>=1.40.57",
+    "lz4>=4.4.4",
 ]
 
 [tool.uv.sources]

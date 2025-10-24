@@ -70,8 +70,8 @@ class ReturnsEngine:
         query_with_both = (
             query_lf_withidx.select('symbol', 'row_id', start_time_expr.alias('start_time'))
             .sort(['symbol', 'start_time'])
-            .filter(pl.col('symbol').cast(str).is_in(list(self.db_symbol_enum.categories)))
-            .with_columns(pl.col('symbol').cast(str).cast(self.db_symbol_enum))
+            .filter(pl.col('symbol').cast(pl.String).is_in(list(self.db_symbol_enum.categories)))
+            .with_columns(pl.col('symbol').cast(pl.String).cast(self.db_symbol_enum))
             .with_columns(
                 pl.col('start_time').dt.offset_by(mark_duration).alias('end_time')
             )
@@ -137,10 +137,10 @@ class ReturnsEngine:
         append_cols = (
             joined_lf.group_by(['row_id', 'symbol'])
             .agg([
-                pl.col('query_time').filter(pl.col('query_type') == 'start').first().alias('start_query_time'), 
-                pl.col('query_time').filter(pl.col('query_type') == 'end').first().alias('end_query_time'), 
-                pl.col('tick_time').filter(pl.col('query_type') == 'start').first().alias('start_tick_time'), 
-                pl.col('tick_time').filter(pl.col('query_type') == 'end').first().alias('end_tick_time'), 
+                # pl.col('query_time').filter(pl.col('query_type') == 'start').first().alias('start_query_time'), 
+                # pl.col('query_time').filter(pl.col('query_type') == 'end').first().alias('end_query_time'), 
+                # pl.col('tick_time').filter(pl.col('query_type') == 'start').first().alias('start_tick_time'), 
+                # pl.col('tick_time').filter(pl.col('query_type') == 'end').first().alias('end_tick_time'), 
 
                 pl.col('tick_to_query_lag').max().alias('max_tick_to_query_lag'), # This is maximum over ticks
                 pl.col('fair').filter(pl.col('query_type') == 'start').first().alias('start_fair'), 

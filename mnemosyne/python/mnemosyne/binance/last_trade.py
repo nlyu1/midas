@@ -14,7 +14,7 @@ def weighted_mean(price_expr: pl.Expr, volume_expr: pl.Expr, final_name: str) ->
     return (price_expr.dot(volume_expr) / volume_expr.sum()).alias(final_name)
 
 def grid_columns():
-    """Streaming-friendly aggregations - no .filter()!"""
+    """Streaming-friendly aggregations"""
     
     # Booleans cast to 0/1, so multiply directly. Don't use filter here, since that will cause memory fallback
     is_taker_buy = ~pl.col('is_buyer_maker')  # Cast to int: True=1, False=0
@@ -107,6 +107,17 @@ class BinanceLastTradesGrid(ByDateDataset):
 
     def _compute_partitions(self, dates: List[Date]) -> pl.LazyFrame:
         """Compute grid data for multiple dates. Returns single DataFrame with all dates."""
+        # date_filepaths = [
+        #     self.path / f'date={str(date)}/*.parquet' 
+        #     for date in dates 
+        # ]
+        # for date in dates:
+        #     date_path = self.path / f'date={str(date)}/0.parquet' 
+        #     assert date_path.is_file(), f'{date_path} should exist'
+        # return pl.concat([
+        #     pl.scan_parquet(date_path).with_columns(pl.col('symbol').cast(pl.String)) for date_path in date_filepaths
+        # ])
+
         unified_lf = (
             self.db.filter(pl.col('date').is_in(dates))
             .rename({'qty': 'quantity', 'quote_qty': 'quote_quantity', 'id': 'trade_id'}, strict=False)

@@ -1,43 +1,34 @@
 """Streamlit app interface for CTDP visualization"""
 
 from pathlib import Path
-from typing import Optional, Tuple, List, Any, Dict
+from typing import Optional, Tuple, List, Any, Union
 from datetime import datetime, date, timedelta
 
 import streamlit as st
 import polars as pl
 import plotly.graph_objects as go
 
-from .state import (
-    load_ctdp_metadata,
-    load_ctdp_filters,
-    load_ctdp_data,
-    save_ctdp_filters,
-    save_ctdp_metadata,
-    update_filter,
-    generate_plots,
-)
-from .formatting import detect_col_type, get_col_range, format_value
+from .state import CTDPCache
+from .formatting import detect_col_type, get_col_range
+from .plotting import _apply_filters
 
 
-def run_app(cache_dir: Path):
+def run_app(cache_dir: Union[str, Path]):
     """
     Main Streamlit app entry point.
 
-    Loads state, renders UI, handles interactions, and persists changes.
+    Loads cache, renders UI, handles interactions, and persists changes.
 
     Args:
         cache_dir: Path to CTDP cache directory
     """
     st.set_page_config(page_title="CTDP Viewer", layout="wide")
 
-    cache_dir = Path(cache_dir)
+    # Load cache
+    cache = CTDPCache(cache_dir)
 
-    # Load state
-    metadata = load_ctdp_metadata(cache_dir)
-    filters = load_ctdp_filters(cache_dir)
-    df_lazy = load_ctdp_data(cache_dir)
-    df_full = df_lazy.collect()
+    # Load full data once for filter ranges
+    df_full = cache.load_data().collect()
 
     # Sidebar controls
     st.sidebar.header("⚙️ Controls")
@@ -45,40 +36,37 @@ def run_app(cache_dir: Path):
         "X-axis ticks",
         min_value=3,
         max_value=20,
-        value=metadata.n_ticks,
+        value=cache.metadata.n_ticks,
     )
     num_cols = st.sidebar.number_input(
         "Grid columns",
         min_value=1,
         max_value=4,
-        value=metadata.num_cols,
+        value=cache.metadata.num_cols,
     )
 
-    # Update metadata if changed
-    if n_ticks != metadata.n_ticks or num_cols != metadata.num_cols:
-        metadata.n_ticks = n_ticks
-        metadata.num_cols = num_cols
-        save_ctdp_metadata(cache_dir, metadata)
+    # Update settings if changed
+    if n_ticks != cache.metadata.n_ticks or num_cols != cache.metadata.num_cols:
+        cache.update_settings(n_ticks=n_ticks, num_cols=num_cols)
 
     st.sidebar.divider()
 
-    # Render filter grid and collect updates
+    # Render filters and collect updates
     new_filters = _render_filter_grid(
         df=df_full,
-        feature_cols=metadata.feature_cols,
-        current_filters=filters,
+        feature_cols=cache.metadata.feature_cols,
+        current_filters=cache.filters,
         num_cols=num_cols,
     )
 
-    # Save filters if changed
-    if not new_filters.equals(filters):
-        save_ctdp_filters(cache_dir, new_filters)
-        filters = new_filters
+    # Save if changed
+    if not new_filters.equals(cache.filters):
+        cache._filters = new_filters
+        cache.save_filters()
 
-    # Apply filters and compute stats
-    if filters.width > 0:
-        from .plotting import _apply_filters
-        df_filtered = _apply_filters(df_lazy, filters).collect()
+    # Compute stats
+    if cache.filters.width > 0:
+        df_filtered = _apply_filters(cache.load_data(), cache.filters).collect()
     else:
         df_filtered = df_full
 
@@ -89,19 +77,17 @@ def run_app(cache_dir: Path):
     retention = 100 * len(df_filtered) / len(df_full) if len(df_full) > 0 else 0
     st.sidebar.metric("Retention", f"{retention:.1f}%")
 
-    # Generate plots
+    # Generate and render plots
     if len(df_filtered) > 0:
-        plots = generate_plots(cache_dir)
-
-        # Render plots in grid
+        plots = cache.generate_plots()
         _render_plots_grid(
             plots=plots,
-            feature_cols=metadata.feature_cols,
-            accum_cols=metadata.accum_cols,
+            feature_cols=cache.metadata.feature_cols,
+            accum_cols=cache.metadata.accum_cols,
             num_cols=num_cols,
         )
     else:
-        st.warning("⚠️ No data matches the current filters!")
+        st.warning("⚠️ No data matches filters!")
 
 
 def _render_filter_grid(
@@ -122,7 +108,12 @@ def _render_filter_grid(
     Returns:
         Updated filters DataFrame
     """
-    new_filters = current_filters.clone() if current_filters.width > 0 else pl.DataFrame()
+    # Import here to avoid circular dependency
+    from .state import _update_filter_df
+
+    new_filters = (
+        current_filters.clone() if current_filters.width > 0 else pl.DataFrame()
+    )
 
     # Render in grid
     for i in range(0, len(feature_cols), num_cols):
@@ -151,7 +142,9 @@ def _render_filter_grid(
                         )
 
                         # Update filters
-                        new_filters = update_filter(new_filters, feat_col, min_val, max_val)
+                        new_filters = _update_filter_df(
+                            new_filters, feat_col, min_val, max_val
+                        )
 
     return new_filters
 
@@ -192,12 +185,16 @@ def _create_filter_widget(
             st.rerun()
 
     # Type-specific widgets
-    if col_type == 'timedelta':
+    if col_type == "timedelta":
         # Convert to seconds for input
         data_min_sec = data_min.total_seconds()
         data_max_sec = data_max.total_seconds()
-        current_min_sec = current_range[0].total_seconds() if current_range[0] else data_min_sec
-        current_max_sec = current_range[1].total_seconds() if current_range[1] else data_max_sec
+        current_min_sec = (
+            current_range[0].total_seconds() if current_range[0] else data_min_sec
+        )
+        current_max_sec = (
+            current_range[1].total_seconds() if current_range[1] else data_max_sec
+        )
 
         min_val = st.number_input(
             "Min (seconds)",
@@ -217,12 +214,16 @@ def _create_filter_widget(
         )
         return (timedelta(seconds=min_val), timedelta(seconds=max_val))
 
-    elif col_type == 'datetime':
+    elif col_type == "datetime":
         # Use date inputs for datetime
         data_min_date = data_min.date()
         data_max_date = data_max.date()
-        current_min_date = current_range[0].date() if current_range[0] else data_min_date
-        current_max_date = current_range[1].date() if current_range[1] else data_max_date
+        current_min_date = (
+            current_range[0].date() if current_range[0] else data_min_date
+        )
+        current_max_date = (
+            current_range[1].date() if current_range[1] else data_max_date
+        )
 
         min_val = st.date_input(
             "Min",
@@ -237,10 +238,10 @@ def _create_filter_widget(
         # Convert back to datetime
         return (
             datetime.combine(min_val, datetime.min.time()),
-            datetime.combine(max_val, datetime.max.time())
+            datetime.combine(max_val, datetime.max.time()),
         )
 
-    elif col_type == 'date':
+    elif col_type == "date":
         current_min_date = current_range[0] if current_range[0] else data_min
         current_max_date = current_range[1] if current_range[1] else data_max
 
@@ -259,8 +260,12 @@ def _create_filter_widget(
     else:  # numeric
         data_min_float = float(data_min)
         data_max_float = float(data_max)
-        current_min_float = float(current_range[0]) if current_range[0] else data_min_float
-        current_max_float = float(current_range[1]) if current_range[1] else data_max_float
+        current_min_float = (
+            float(current_range[0]) if current_range[0] else data_min_float
+        )
+        current_max_float = (
+            float(current_range[1]) if current_range[1] else data_max_float
+        )
 
         min_val = st.number_input(
             "Min",
