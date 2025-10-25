@@ -22,6 +22,7 @@ dependencies = [
     "maturin[patchself]>=1.9.6",
     "boto3>=1.40.57",
     "lz4>=4.4.4",
+    "polars-u64-idx>=1.33.1",
 ]
 
 [tool.uv.sources]
