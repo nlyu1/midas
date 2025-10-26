@@ -161,16 +161,21 @@ class ByDateDataview(ABC):
         """
         return {}
 
-    def _postprocess_lf(self, lf) -> pl.LazyFrame:
+    def cast_symbol_col_to_enum(self, lf) -> pl.LazyFrame:
         """
-        Common postprocessing steps. Cast symbol column to enum for categorical efficiency if present.
-        This operation is **idempotent**, as it is performed both during sinking & later.
-        Subclasses can override to add additional processing while calling super()._postprocess_lf(lf).
+        Cast symbol column to enum for categorical efficiency if present.
         """
-        schema = lf.collect_schema()
+        schema = lf.collect_schema() if isinstance(lf, pl.LazyFrame) else lf.schema
         if 'symbol' in schema:
             return lf.with_columns(pl.col('symbol').cast(self._symbol_enum))
         return lf 
+
+    def _postprocess_lf(self, lf) -> pl.LazyFrame:
+        """
+        Common postprocessing steps. This operation is only applied during reading. 
+        Subclasses can override to add additional processing while calling super()._postprocess_lf(lf).
+        """
+        return self.cast_symbol_col_to_enum(lf)
 
     @abstractmethod
     def universe(self) -> pl.DataFrame:

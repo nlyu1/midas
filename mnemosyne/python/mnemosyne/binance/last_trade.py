@@ -28,38 +28,40 @@ def grid_columns():
     yield pl.max('price').alias('high')
     yield pl.min('price').alias('low')
     yield pl.last('price').alias('close')
-    yield pl.sum('quantity').alias('volume_base')
-    yield pl.sum('quote_quantity').alias('volume_quote')
+    yield pl.sum('quantity').alias('volume')
     yield pl.len().alias('trade_count')
-    yield pl.last('time').alias('last_trade_time')
+    yield pl.last('time').alias('last_event_time')
     
     # --- Taker Volumes (using multiplication) ---
     # When is_taker_buy=True (1), include quote_quantity; when False (0), contribute 0
-    yield (pl.col('quote_quantity') * is_taker_buy).sum().alias('taker_buy_volume_quote')
-    yield (pl.col('quote_quantity') * is_taker_sell).sum().alias('taker_sell_volume_quote')
+    yield (pl.col('quantity') * is_taker_buy).sum().alias('taker_buy_volume')
+    yield (pl.col('quantity') * is_taker_sell).sum().alias('taker_sell_volume')
     
     # --- VWAP (adjusted for multiplication) ---
     yield weighted_mean(
         pl.col('price'),
-        pl.col('quote_quantity') * is_taker_buy,
+        pl.col('quantity') * is_taker_buy,
         'vwap_taker_buy'
     )
     yield weighted_mean(
         pl.col('price'),
-        pl.col('quote_quantity') * is_taker_sell,
+        pl.col('quantity') * is_taker_sell,
         'vwap_taker_sell'
     )
     yield weighted_mean(
         pl.col('price'),
         pl.col('quantity'),
-        'vwap_total_by_base'
+        'vwap_price'
     )
 
 def grid_query(lf: pl.LazyFrame, grid_interval: str) -> pl.LazyFrame:
     return (
+        # Note: it is very important to offset grid-time by grid_interval! 
+        # truncate does backward rounding
         lf
         .group_by(
-            'symbol', 'date', pl.col('time').dt.truncate(every=grid_interval).alias('time_grid')
+            'symbol', 'date', 
+            pl.col('time').dt.truncate(every=grid_interval).dt.offset_by(grid_interval).alias('time_grid')
         )
         .agg(
             grid_columns()

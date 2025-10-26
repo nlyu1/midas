@@ -1,5 +1,4 @@
 import polars as pl
-from datetime import timedelta as Timedelta 
 from atlas import printv_lazy
 
 
@@ -31,8 +30,8 @@ class ReturnsEngine:
     def query(self,
             query_lf: pl.LazyFrame,
             start_time_expr: pl.Expr = pl.col('start_time'),
-            mark_duration: Timedelta = Timedelta(minutes=10),
-            tick_lag_tolerance: Timedelta = Timedelta(seconds=30),
+            mark_duration: pl.Expr = pl.lit('10m'),
+            tick_lag_tolerance: pl.Expr = pl.lit('30s'),
             append_query_tick_times: bool = False,
             append_lag: bool = True,
             filter_by_query_dates: bool = True,
@@ -74,8 +73,8 @@ class ReturnsEngine:
 
     def query_batch(self,
             query_lf: pl.LazyFrame,
-            mark_exprs: dict[str, tuple[pl.Expr, Timedelta]],
-            tick_lag_tolerance: Timedelta = Timedelta(seconds=30),
+            mark_exprs: dict[str, tuple[pl.Expr, pl.Expr]],
+            tick_lag_tolerance: pl.Expr = pl.lit('30s'),
             append_query_tick_times: bool = False,
             append_lag: bool = True,
             filter_by_query_dates: bool = True,
@@ -88,8 +87,8 @@ class ReturnsEngine:
         Args:
             query_lf: Input query LazyFrame
             mark_exprs: Dictionary mapping return column names to (start_time_expr, mark_duration) tuples
-                       Example: {'now_to_p10m': (pl.col('time'), Timedelta(minutes=10)),
-                                 'p1m_to_p11m': (pl.col('time') + Timedelta(minutes=1), Timedelta(minutes=10))}
+                       Example: {'now_to_p10m': (pl.col('time'), pl.lit('10m')),
+                                 'p1m_to_p11m': (pl.col('time').dt.offset_by('1m'), pl.lit('10m'))}
             tick_lag_tolerance: Maximum allowed lag between tick and query time
             append_query_tick_times: Whether to append query and tick times for each mark
             append_lag: Whether to append max_tick_to_query_lag for each mark
@@ -127,7 +126,7 @@ class ReturnsEngine:
         return_col_enum = pl.Enum(list(mark_exprs.keys()))
 
         frames = []
-        for ret_col_name, (start_expr, duration) in mark_exprs.items():
+        for ret_col_name, (start_expr, duration_expr) in mark_exprs.items():
             frame = (
                 query_lf_withidx
                 .select('symbol', 'row_id', start_expr.alias('start_time'))
@@ -135,7 +134,7 @@ class ReturnsEngine:
                 .filter(pl.col('symbol').cast(pl.String).is_in(list(self.db_symbol_enum.categories)))
                 .with_columns(pl.col('symbol').cast(pl.String).cast(self.db_symbol_enum))
                 .with_columns(
-                    (pl.col('start_time') + duration).alias('end_time'),
+                    pl.col('start_time').dt.offset_by(duration_expr).alias('end_time'),
                     pl.lit(ret_col_name).cast(return_col_enum).alias('return_col_name')
                 )
                 .with_columns([
@@ -152,10 +151,10 @@ class ReturnsEngine:
             # Compute date range across all mark specs
             all_min_dates = []
             all_max_dates = []
-            for start_expr, duration in mark_exprs.values():
+            for start_expr, duration_expr in mark_exprs.values():
                 min_d, max_d = query_lf.select(
                     start_expr.dt.date().min().alias('min'),
-                    (start_expr + duration).dt.date().max().alias('max')
+                    start_expr.dt.offset_by(duration_expr).dt.date().max().alias('max')
                 ).collect().row(0)
                 all_min_dates.append(min_d)
                 all_max_dates.append(max_d)
@@ -209,7 +208,7 @@ class ReturnsEngine:
         ).with_columns(
             (pl.col('query_time') - pl.col('tick_time')).alias('tick_to_query_lag'),
             pl.when(
-                (pl.col('tick_time') + tick_lag_tolerance) >= pl.col('query_time')
+                pl.col('tick_time').dt.offset_by(tick_lag_tolerance) >= pl.col('query_time')
             ).then(pl.col('fair')).otherwise(None).alias('fair')
         ).select('row_id', 'symbol', 'return_col_name', 'query_time', 'query_type',
                  'tick_to_query_lag', 'fair', 'tick_time')
@@ -257,16 +256,16 @@ class ReturnsEngine:
         return result 
 
 
-    def _legacy_query(self,
-            query_lf: pl.LazyFrame,
-            start_time_expr: pl.Expr = pl.col('start_time'),
-            mark_duration: Timedelta = Timedelta(minutes=10),
-            tick_lag_tolerance: Timedelta = Timedelta(seconds=30),
-            append_query_tick_times: bool = False,
+    def _legacy_query(self, 
+            query_lf: pl.LazyFrame, 
+            start_time_expr: pl.Expr = pl.col('start_time'), 
+            mark_duration: pl.Expr = pl.lit('10m'), 
+            tick_lag_tolerance: pl.Expr = pl.lit('30s'), 
+            append_query_tick_times: bool = False, 
             append_lag: bool = True,
-            filter_by_query_dates: bool = True,
+            filter_by_query_dates: bool = True, 
             append_start_end_fairs: bool = False,
-            verbose_debug: bool = False
+            verbose_debug: bool = False 
         ) -> pl.LazyFrame:
         """
         Used for testing purposes
@@ -300,7 +299,7 @@ class ReturnsEngine:
             .filter(pl.col('symbol').cast(pl.String).is_in(list(self.db_symbol_enum.categories)))
             .with_columns(pl.col('symbol').cast(pl.String).cast(self.db_symbol_enum))
             .with_columns(
-                (pl.col('start_time') + mark_duration).alias('end_time')
+                pl.col('start_time').dt.offset_by(mark_duration).alias('end_time')
             )
             .with_columns([
                 pl.col('start_time').set_sorted(),
@@ -314,7 +313,7 @@ class ReturnsEngine:
             # Sort by tick_time
             min_date, max_date = query_lf.select(
                 start_time_expr.dt.date().min().alias('min'),
-                (start_time_expr + mark_duration).dt.date().max().alias('max')
+                start_time_expr.dt.offset_by(mark_duration).dt.date().max().alias('max')
             ).collect().row(0)
             printv_lazy(lambda: f'Query min_date: {min_date} max_date: {max_date}', verbose_debug)
             inrange_db = self.db.filter(
@@ -353,7 +352,7 @@ class ReturnsEngine:
             ]).sort(['symbol', 'query_time'])
         printv_lazy(lambda: f'long_query: {long_query.collect().shape}, {long_query.collect_schema()}', verbose_debug)
 
-        # Do the join-asof
+        # Do the join-asof 
         # When tick-time is behind query_time beyond specified tolerance, fill with nan
         joined_lf = long_query.join_asof(
             inrange_db,
@@ -364,7 +363,7 @@ class ReturnsEngine:
         ).with_columns(
             (pl.col('query_time') - pl.col('tick_time')).alias('tick_to_query_lag'),
             pl.when(
-                (pl.col('tick_time') + tick_lag_tolerance) >= pl.col('query_time')
+                pl.col('tick_time').dt.offset_by(tick_lag_tolerance) >= pl.col('query_time')
             ).then(pl.col('fair')).otherwise(None).alias('fair')
         ).select('row_id', 'symbol', 'query_time', 'query_type', 'tick_to_query_lag', 'fair', 'tick_time')
         # return query_with_both, long_query, inrange_db, joined_lf 
