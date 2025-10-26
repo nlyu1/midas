@@ -1,12 +1,13 @@
 from . import mnemosyne as _mnemosyne_ext
-from .mnemosyne import DatasetType 
-from . import dataset 
-from . import binance 
-from . import engines 
+# Use pure Python DatasetType instead of Rust version for picklability
+from .dataset.dataset_types import DatasetType
+from . import dataset
+from . import binance
+from . import engines
 
 __all__ = [
-    "DatasetType", 
+    "DatasetType",
     "dataset",
-    "binance", 
+    "binance",
     "engines"
 ]

@@ -1,6 +1,7 @@
 from ..dataset import ByDateDataset
 from dataclasses import dataclass
 from datetime import date as Date
+from timedelta_isoformat import timedelta as Timedelta
 from typing import Dict, Optional, List
 import polars as pl
 from pathlib import Path
@@ -54,14 +55,14 @@ def grid_columns():
         'vwap_price'
     )
 
-def grid_query(lf: pl.LazyFrame, grid_interval: str) -> pl.LazyFrame:
+def grid_query(lf: pl.LazyFrame, grid_interval: Timedelta) -> pl.LazyFrame:
     return (
-        # Note: it is very important to offset grid-time by grid_interval! 
+        # Note: it is very important to offset grid-time by grid_interval!
         # truncate does backward rounding
         lf
         .group_by(
-            'symbol', 'date', 
-            pl.col('time').dt.truncate(every=grid_interval).dt.offset_by(grid_interval).alias('time_grid')
+            'symbol', 'date',
+            (pl.col('time').dt.truncate(every=grid_interval) + grid_interval).alias('time_grid')
         )
         .agg(
             grid_columns()
@@ -73,16 +74,20 @@ def grid_query(lf: pl.LazyFrame, grid_interval: str) -> pl.LazyFrame:
 @dataclass(kw_only=True)
 class BinanceLastTradesGrid(ByDateDataset):
     peg_symbol: str
-    grid_interval: str
+    grid_interval: Timedelta
     dataset_type: Optional[DatasetType] = None
     src_path: Optional[Path] = None
     parquet_names: str = '*.parquet'
 
     def __post_init__(self):
+        # Convert string to Timedelta if needed (for worker deserialization)
+        if isinstance(self.grid_interval, str):
+            self.grid_interval = self.grid_interval.isoformat()
+
         if self.dataset_type is not None:
             # User initialization - compute paths from dataset_type
             self.src_path = Path(self.dataset_type.hive_path(self.peg_symbol))
-            self.path = Path(self.dataset_type.grid_hive_path(self.peg_symbol, self.grid_interval))
+            self.path = Path(self.dataset_type.grid_hive_path(self.peg_symbol, self.grid_interval.isoformat()))
         else:
             # Worker initialization - paths provided as strings from kwargs
             self.src_path = Path(self.src_path)

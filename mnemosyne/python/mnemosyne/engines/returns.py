@@ -1,5 +1,5 @@
 import polars as pl
-from datetime import timedelta as Timedelta 
+from timedelta_isoformat import timedelta as Timedelta
 from atlas import printv_lazy
 
 

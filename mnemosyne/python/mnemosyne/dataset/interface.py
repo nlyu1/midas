@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 @dataclass(kw_only=True)
 class ByDateDataview(ABC):
     path: Path = Path('')
-    num_workers: int = 16
+    num_workers: int = 1
     parquet_names: str = "*.parquet"
     _valid_partitions: Set[Date] = field(default_factory=set, init=False, repr=False)
     _validation_file: Path = field(init=False, repr=False)
