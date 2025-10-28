@@ -23,6 +23,8 @@ dependencies = [
     "boto3>=1.40.57",
     "lz4>=4.4.4",
     "polars-u64-idx>=1.33.1",
+    "timedelta-isoformat>=0.7.0",
+    "pydantic>=2.12.3",
 ]
 
 [tool.uv.sources]
