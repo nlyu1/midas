@@ -140,7 +140,7 @@ Edit `Cargo.toml`:
 
 ```toml
 [dependencies]
-pyo3 = "0.26.0"
+pyo3 = "0.25.0"
 serde = { version = "1.0", features = ["derive"] }
 ```
 

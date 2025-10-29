@@ -9,4 +9,4 @@ path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = "0.26.0"
+pyo3 = "0.25.0"
